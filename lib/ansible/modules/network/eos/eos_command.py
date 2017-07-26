@@ -16,11 +16,10 @@
 # along with Ansible.  If not, see <http://www.gnu.org/licenses/>.
 #
 
-ANSIBLE_METADATA = {
-    'status': ['preview'],
-    'supported_by': 'core',
-    'version': '1.0'
-}
+ANSIBLE_METADATA = {'metadata_version': '1.0',
+                    'status': ['preview'],
+                    'supported_by': 'core'}
+
 
 DOCUMENTATION = """
 ---
@@ -33,6 +32,7 @@ description:
     read from the device.  This module includes an
     argument that will cause the module to wait for a specific condition
     before returning or timing out if the condition is not met.
+extends_documentation_fragment: eos
 options:
   commands:
     description:
@@ -94,7 +94,7 @@ EXAMPLES = """
     wait_for: result[0] contains Arista
 
 - name: run multiple commands on remote nodes
-   eos_command:
+  eos_command:
     commands:
       - show version
       - show interfaces
@@ -116,8 +116,18 @@ EXAMPLES = """
 """
 
 RETURN = """
+stdout:
+  description: The set of responses from the commands
+  returned: always apart from low level errors (such as action plugin)
+  type: list
+  sample: ['...', '...']
+stdout_lines:
+  description: The value of stdout split into a list
+  returned: always apart from low level errors (such as action plugin)
+  type: list
+  sample: [['...', '...'], ['...'], ['...']]
 failed_conditions:
-  description: the conditionals that failed
+  description: The list of conditionals that have failed
   returned: failed
   type: list
   sample: ['...', '...']
@@ -125,6 +135,7 @@ failed_conditions:
 import time
 
 from ansible.module_utils.basic import AnsibleModule
+from ansible.module_utils.pycompat24 import get_exception
 from ansible.module_utils.six import string_types
 from ansible.module_utils.netcli import Conditional
 from ansible.module_utils.network_common import ComplexList
@@ -142,13 +153,14 @@ def to_lines(stdout):
     return lines
 
 def parse_commands(module, warnings):
-    transform = ComplexList(dict(
+    spec = dict(
         command=dict(key=True),
         output=dict(),
         prompt=dict(),
-        response=dict()
-    ))
+        answer=dict()
+    )
 
+    transform = ComplexList(spec, module)
     commands = transform(module.params['commands'])
 
     for index, item in enumerate(commands):
@@ -193,7 +205,12 @@ def main():
         result['warnings'] = warnings
 
     wait_for = module.params['wait_for'] or list()
-    conditionals = [Conditional(c) for c in wait_for]
+
+    try:
+        conditionals = [Conditional(c) for c in wait_for]
+    except AttributeError:
+        exc = get_exception()
+        module.fail_json(msg=str(exc))
 
     retries = module.params['retries']
     interval = module.params['interval']

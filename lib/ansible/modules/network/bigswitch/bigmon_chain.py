@@ -19,13 +19,15 @@
 # You should have received a copy of the GNU General Public License
 # along with Ansible.  If not, see <http://www.gnu.org/licenses/>.
 
-ANSIBLE_METADATA = {'status': ['preview'],
-                    'supported_by': 'community',
-                    'version': '1.0'}
+ANSIBLE_METADATA = {'metadata_version': '1.0',
+                    'status': ['preview'],
+                    'supported_by': 'community'}
+
 
 DOCUMENTATION = '''
 ---
 module: bigmon_chain
+author: "Ted (@tedelhourani)"
 short_description: Create and remove a bigmon inline service chain.
 description:
     - Create and remove a bigmon inline service chain.
@@ -59,29 +61,15 @@ options:
 
 EXAMPLES = '''
 - name: bigmon inline service chain
-      bigmon_chain:
-        name: MyChain
-        controller: '{{ inventory_hostname }}'
-        state: present
-        validate_certs: false
+  bigmon_chain:
+    name: MyChain
+    controller: '{{ inventory_hostname }}'
+    state: present
+    validate_certs: false
 '''
 
 
-RETURN = '''
-{
-    "changed": true,
-    "invocation": {
-        "module_args": {
-            "access_token": null,
-            "controller": "192.168.86.221",
-            "name": "MyChain",
-            "state": "present",
-            "validate_certs": false
-        },
-        "module_name": "bigmon_chain"
-    }
-}
-'''
+RETURN = ''' # '''
 
 import os
 from ansible.module_utils.basic import AnsibleModule

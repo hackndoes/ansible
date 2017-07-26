@@ -15,24 +15,24 @@
 # You should have received a copy of the GNU General Public License
 # along with Ansible.  If not, see <http://www.gnu.org/licenses/>.
 #
-ANSIBLE_METADATA = {
-    'status': ['preview'],
-    'supported_by': 'core',
-    'version': '1.0'
-}
+ANSIBLE_METADATA = {'metadata_version': '1.0',
+                    'status': ['preview'],
+                    'supported_by': 'core'}
+
 
 DOCUMENTATION = """
 ---
 module: ios_facts
 version_added: "2.2"
 author: "Peter Sprygada (@privateip)"
-short_description: Collect facts from remote devices running IOS
+short_description: Collect facts from remote devices running Cisco IOS
 description:
   - Collects a base set of device facts from a remote device that
     is running IOS.  This module prepends all of the
     base network fact keys with C(ansible_net_<fact>).  The facts
     module will always collect a base set of facts from the device
     and can enable or disable collection of additional facts.
+extends_documentation_fragment: ios
 options:
   gather_subset:
     description:
@@ -49,6 +49,7 @@ options:
 EXAMPLES = """
 # Note: examples below use the following provider dict to handle
 #       transport and authentication to the node.
+---
 vars:
   cli:
     host: "{{ inventory_hostname }}"
@@ -56,6 +57,7 @@ vars:
     password: cisco
     transport: cli
 
+---
 # Collect all facts from the device
 - ios_facts:
     gather_subset: all
@@ -220,10 +222,12 @@ class Hardware(FactsBase):
 
         data = self.responses[1]
         if data:
-            match = re.findall(r'\s(\d+)\s', data)
+            processor_line = [l for l in data.splitlines()
+                              if 'Processor' in l].pop()
+            match = re.findall(r'\s(\d+)\s', processor_line)
             if match:
                 self.facts['memtotal_mb'] = int(match[0]) / 1024
-                self.facts['memfree_mb'] = int(match[1]) / 1024
+                self.facts['memfree_mb'] = int(match[3]) / 1024
 
     def parse_filesystems(self, data):
         return re.findall(r'^Directory of (\S+)/', data, re.M)

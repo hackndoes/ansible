@@ -1,5 +1,4 @@
 #!/usr/bin/python
-
 # -*- coding: utf-8 -*-
 # This file is part of Ansible
 #
@@ -19,9 +18,10 @@
 # TODO:
 # Ability to set CPU/Memory reservations
 
-ANSIBLE_METADATA = {'status': ['preview'],
-                    'supported_by': 'community',
-                    'version': '1.0'}
+ANSIBLE_METADATA = {'metadata_version': '1.0',
+                    'status': ['preview'],
+                    'supported_by': 'community'}
+
 
 DOCUMENTATION = '''
 ---
@@ -74,18 +74,21 @@ options:
     default: None
   esxi:
     description:
-      - Dictionary which includes datacenter and hostname on which the VM should be created. For standalone ESXi hosts, ha-datacenter should be used as the datacenter name
+      - Dictionary which includes datacenter and hostname on which the VM should be created. For standalone ESXi hosts, ha-datacenter should be used as the
+        datacenter name
     required: false
     default: null
   state:
     description:
-      - Indicate desired state of the vm. 'reconfigured' only applies changes to 'vm_cdrom', 'memory_mb', and 'num_cpus' in vm_hardware parameter. The 'memory_mb' and 'num_cpus' changes are applied to powered-on vms when hot-plugging is enabled for the guest.
+      - Indicate desired state of the vm. 'reconfigured' only applies changes to 'vm_cdrom', 'memory_mb', and 'num_cpus' in vm_hardware parameter.
+        The 'memory_mb' and 'num_cpus' changes are applied to powered-on vms when hot-plugging is enabled for the guest.
     default: present
     choices: ['present', 'powered_off', 'absent', 'powered_on', 'restarted', 'reconfigured']
   from_template:
     version_added: "1.9"
     description:
-      - Specifies if the VM should be deployed from a template (mutually exclusive with 'state' parameter). No guest customization changes to hardware such as CPU, RAM, NICs or Disks can be applied when launching from template.
+      - Specifies if the VM should be deployed from a template (mutually exclusive with 'state' parameter). No guest customization changes to hardware
+        such as CPU, RAM, NICs or Disks can be applied when launching from template.
     default: no
     choices: ['yes', 'no']
   template_src:
@@ -127,7 +130,8 @@ options:
     default: null
   vm_hw_version:
     description:
-      - Desired hardware version identifier (for example, "vmx-08" for vms that needs to be managed with vSphere Client). Note that changing hardware version of existing vm is not supported.
+      - Desired hardware version identifier (for example, "vmx-08" for vms that needs to be managed with vSphere Client). Note that changing hardware
+        version of existing vm is not supported.
     required: false
     default: null
     version_added: "1.7"
@@ -153,6 +157,7 @@ requirements:
 
 
 EXAMPLES = '''
+---
 # Create a new VM on an ESX server
 # Returns changed = False when the VM already exists
 # Returns changed = True and a adds ansible_facts from the new VM
@@ -258,7 +263,7 @@ EXAMPLES = '''
     guest: newvm001
     vmware_guest_facts: yes
 
-
+---
 # Typical output of a vsphere_facts run on a guest
 # If vmware tools is not installed, ipadresses with return None
 
@@ -277,22 +282,22 @@ EXAMPLES = '''
   hw_processor_count: 2
   hw_product_uuid: "ef50bac8-2845-40ff-81d9-675315501dac"
 
-hw_power_status will be one of the following values:
-  - POWERED ON
-  - POWERED OFF
-  - SUSPENDED
-  - POWERING ON
-  - POWERING OFF
-  - SUSPENDING
-  - RESETTING
-  - BLOCKED ON MSG
-  - REVERTING TO SNAPSHOT
-  - UNKNOWN
-as seen in the VMPowerState-Class of PySphere: http://git.io/vlwOq
+# hw_power_status will be one of the following values:
+#   - POWERED ON
+#   - POWERED OFF
+#   - SUSPENDED
+#   - POWERING ON
+#   - POWERING OFF
+#   - SUSPENDING
+#   - RESETTING
+#   - BLOCKED ON MSG
+#   - REVERTING TO SNAPSHOT
+#   - UNKNOWN
+# as seen in the VMPowerState-Class of PySphere: http://git.io/vlwOq
 
+---
 # Remove a vm from vSphere
 # The VM must be powered_off or you need to use force to force a shutdown
-
 - vsphere_guest:
     vcenter_hostname: vcenter.mydomain.local
     username: myuser
@@ -302,10 +307,11 @@ as seen in the VMPowerState-Class of PySphere: http://git.io/vlwOq
     force: yes
 '''
 
-try:
-    import json
-except ImportError:
-    import simplejson as json
+import json
+import os
+import re
+import ssl
+import traceback
 
 HAS_PYSPHERE = False
 try:
@@ -317,7 +323,9 @@ try:
 except ImportError:
     pass
 
-import ssl
+from ansible.module_utils.basic import AnsibleModule
+from ansible.module_utils.six import string_types
+from ansible.module_utils._text import to_native
 
 
 def add_scsi_controller(module, s, config, devices, type="paravirtual", bus_num=0, disk_ctrl_key=1):
@@ -761,7 +769,7 @@ def deploy_template(vsphere_client, guest, resource_pool, template_src, esxi, mo
                 vm.set_extra_config(vm_extra_config)
 
             # Power on if asked
-            if power_on_after_clone == True:
+            if power_on_after_clone is True:
                 state = 'powered_on'
                 power_state(vm, state, True)
 
@@ -784,6 +792,7 @@ def update_disks(vsphere_client, vm, module, vm_disk, changes):
 
     for cnf_disk in vm_disk:
         disk_id = re.sub("disk", "", cnf_disk)
+        disk_type = vm_disk[cnf_disk]['type']
         found = False
         for dev_key in vm._devices:
             if vm._devices[dev_key]['type'] == 'VirtualDisk':
@@ -815,7 +824,10 @@ def update_disks(vsphere_client, vm, module, vm_disk, changes):
             backing.DiskMode = "persistent"
             backing.Split = False
             backing.WriteThrough = False
-            backing.ThinProvisioned = False
+            if disk_type == 'thin':
+                backing.ThinProvisioned = True
+            else:
+                backing.ThinProvisioned = False
             backing.EagerlyScrub = False
             hd.Backing = backing
 
@@ -857,6 +869,7 @@ def reconfigure_vm(vsphere_client, vm, module, esxi, resource_pool, cluster_name
 
     changed, changes = update_disks(vsphere_client, vm,
                                     module, vm_disk, changes)
+    vm.properties._flush_cache()
     request = VI.ReconfigVM_TaskRequestMsg()
 
     # Change extra config
@@ -1003,8 +1016,9 @@ def reconfigure_vm(vsphere_client, vm, module, esxi, resource_pool, cluster_name
             # Make sure the new disk size is higher than the current value
             dev = dev_list[disk_num]
             if disksize < int(dev.capacityInKB):
-              vsphere_client.disconnect()
-              module.fail_json(msg="Error in '%s' definition. New size needs to be higher than the current value (%s GB)." % (disk, int(dev.capacityInKB) / 1024 / 1024))
+                vsphere_client.disconnect()
+                module.fail_json(msg="Error in '%s' definition. New size needs to be higher than the current value (%s GB)." %
+                                     (disk, int(dev.capacityInKB) / 1024 / 1024))
 
             # Set the new disk size
             elif disksize > int(dev.capacityInKB):
@@ -1029,11 +1043,10 @@ def reconfigure_vm(vsphere_client, vm, module, esxi, resource_pool, cluster_name
                 vm.power_off(sync_run=True)
                 vm.get_status()
 
-            except Exception:
-                e = get_exception()
-                module.fail_json(
-                    msg='Failed to shutdown vm %s: %s' % (guest, e)
-                )
+            except Exception as e:
+                module.fail_json(msg='Failed to shutdown vm %s: %s'
+                                 % (guest, to_native(e)),
+                                 exception=traceback.format_exc())
 
         if len(devices):
             spec.set_element_deviceChange(devices)
@@ -1053,10 +1066,10 @@ def reconfigure_vm(vsphere_client, vm, module, esxi, resource_pool, cluster_name
         if vm.is_powered_off() and poweron:
             try:
                 vm.power_on(sync_run=True)
-            except Exception:
-                e = get_exception()
+            except Exception as e:
                 module.fail_json(
-                    msg='Failed to power on vm %s : %s' % (guest, e)
+                    msg='Failed to power on vm %s : %s' % (guest, to_native(e)),
+                    exception=traceback.format_exc()
                 )
 
     vsphere_client.disconnect()
@@ -1348,6 +1361,8 @@ def create_vm(vsphere_client, module, esxi, resource_pool, cluster_name, guest, 
     if vm_disk:
         disk_num = 0
         disk_key = 0
+        bus_num = 0
+        disk_ctrl = 1
         for disk in sorted(vm_disk):
             try:
                 datastore = vm_disk[disk]['datastore']
@@ -1370,6 +1385,16 @@ def create_vm(vsphere_client, module, esxi, resource_pool, cluster_name, guest, 
                 module.fail_json(
                     msg="Error on %s definition. type needs to be"
                     " specified." % disk)
+            if disk_num == 7:
+                disk_num = disk_num + 1
+                disk_key = disk_key + 1
+            elif disk_num > 15:
+                bus_num = bus_num + 1
+                disk_ctrl = disk_ctrl + 1
+                disk_ctrl_key = add_scsi_controller(
+                    module, vsphere_client, config, devices, type=vm_hardware['scsi'], bus_num=bus_num, disk_ctrl_key=disk_ctrl)
+                disk_num = 0
+                disk_key = 0
             # Add the disk  to the VM spec.
             add_disk(
                 module, vsphere_client, config_target, config,
@@ -1479,10 +1504,10 @@ def delete_vm(vsphere_client, module, guest, vm, force):
                     vm.power_off(sync_run=True)
                     vm.get_status()
 
-                except Exception:
-                    e = get_exception()
+                except Exception as e:
                     module.fail_json(
-                        msg='Failed to shutdown vm %s: %s' % (guest, e))
+                        msg='Failed to shutdown vm %s: %s' % (guest, to_native(e)),
+                        exception=traceback.format_exc())
             else:
                 module.fail_json(
                     msg='You must use either shut the vm down first or '
@@ -1504,10 +1529,10 @@ def delete_vm(vsphere_client, module, guest, vm, force):
             module.fail_json(msg="Error removing vm: %s %s" %
                              task.get_error_message())
         module.exit_json(changed=True, changes="VM %s deleted" % guest)
-    except Exception:
-        e = get_exception()
+    except Exception as e:
         module.fail_json(
-            msg='Failed to delete vm %s : %s' % (guest, e))
+            msg='Failed to delete vm %s : %s' % (guest, to_native(e)),
+            exception=traceback.format_exc())
 
 
 def power_state(vm, state, force):
@@ -1547,8 +1572,8 @@ def power_state(vm, state, force):
                         % power_status
             return True
 
-        except Exception:
-            return get_exception()
+        except Exception as e:
+            return e
 
     return False
 
@@ -1626,8 +1651,9 @@ class DefaultVMConfig(object):
                                 try:
                                     if v == int:
                                         self.check_dict[key][k] = int(self.check_dict[key][k])
-                                    elif v == basestring:
-                                        self.check_dict[key][k] = str(self.check_dict[key][k])
+                                    elif v == string_types:
+                                        self.check_dict[key][k] = to_native(self.check_dict[key][k],
+                                                                            errors='surrogate_or_strict')
                                     else:
                                         raise ValueError
                                 except ValueError:
@@ -1665,29 +1691,29 @@ def main():
     proto_vm_hardware = {
         'memory_mb': int,
         'num_cpus': int,
-        'scsi': basestring,
-        'osid': basestring
+        'scsi': string_types,
+        'osid': string_types
     }
 
     proto_vm_disk = {
         'disk1': {
-            'datastore': basestring,
+            'datastore': string_types,
             'size_gb': int,
-            'type': basestring
+            'type': string_types
         }
     }
 
     proto_vm_nic = {
         'nic1': {
-            'type': basestring,
-            'network': basestring,
-            'network_type': basestring
+            'type': string_types,
+            'network': string_types,
+            'network_type': string_types
         }
     }
 
     proto_esxi = {
-        'datacenter': basestring,
-        'hostname': basestring
+        'datacenter': string_types,
+        'hostname': string_types
     }
 
     module = AnsibleModule(
@@ -1777,7 +1803,8 @@ def main():
     # CONNECT TO THE SERVER
     viserver = VIServer()
     if validate_certs and not hasattr(ssl, 'SSLContext') and not vcenter_hostname.startswith('http://'):
-        module.fail_json(msg='pysphere does not support verifying certificates with python < 2.7.9.  Either update python or set validate_certs=False on the task')
+        module.fail_json(msg='pysphere does not support verifying certificates with python < 2.7.9.  Either update python or set '
+                             'validate_certs=False on the task')
 
     try:
         viserver.connect(vcenter_hostname, username, password)
@@ -1791,10 +1818,10 @@ def main():
                 module.fail_json(msg='Unable to validate the certificate of the vcenter host %s' % vcenter_hostname)
         else:
             raise
-    except VIApiException:
-        err = get_exception()
+    except VIApiException as err:
         module.fail_json(msg="Cannot connect to %s: %s" %
-                         (vcenter_hostname, err))
+                         (vcenter_hostname, to_native(err)),
+                         exception=traceback.format_exc())
 
     # Check if the VM exists before continuing
     try:
@@ -1807,16 +1834,15 @@ def main():
         if vmware_guest_facts:
             try:
                 module.exit_json(ansible_facts=gather_facts(vm))
-            except Exception:
-                e = get_exception()
-                module.fail_json(
-                    msg="Fact gather failed with exception %s" % e)
+            except Exception as e:
+                module.fail_json(msg="Fact gather failed with exception %s"
+                                 % to_native(e), exception=traceback.format_exc())
         # Power Changes
         elif state in ['powered_on', 'powered_off', 'restarted']:
             state_result = power_state(vm, state, force)
 
             # Failure
-            if isinstance(state_result, basestring):
+            if isinstance(state_result, string_types):
                 module.fail_json(msg=state_result)
             else:
                 module.exit_json(changed=state_result)
@@ -1880,6 +1906,12 @@ def main():
         elif state == 'absent':
             module.exit_json(changed=False, msg="vm %s not present" % guest)
 
+        # check if user is trying to perform state operation on a vm which doesn't exists
+        elif state in ['present', 'powered_off', 'powered_on'] and not all((vm_extra_config,
+                                                       vm_hardware, vm_disk, vm_nic, esxi)):
+            module.exit_json(changed=False, msg="vm %s not present" % guest)
+
+
         # Create the VM
         elif state in ['present', 'powered_off', 'powered_on']:
 
@@ -1910,7 +1942,5 @@ def main():
         vcenter=vcenter_hostname)
 
 
-# this is magic, see lib/ansible/module_common.py
-from ansible.module_utils.basic import *
 if __name__ == '__main__':
     main()

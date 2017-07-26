@@ -16,9 +16,10 @@
 # You should have received a copy of the GNU General Public License
 # along with this software.  If not, see <http://www.gnu.org/licenses/>.
 
-ANSIBLE_METADATA = {'status': ['preview'],
-                    'supported_by': 'community',
-                    'version': '1.0'}
+ANSIBLE_METADATA = {'metadata_version': '1.0',
+                    'status': ['preview'],
+                    'supported_by': 'community'}
+
 
 DOCUMENTATION = '''
 ---
@@ -59,6 +60,10 @@ options:
        - Image the server should be rebuilt with
      default: null
      version_added: "2.3"
+   availability_zone:
+     description:
+       - Ignored. Present for backwards compatibility
+     required: false
 requirements:
     - "python >= 2.6"
     - "shade"
@@ -84,6 +89,9 @@ try:
 except ImportError:
     HAS_SHADE = False
 
+from ansible.module_utils.basic import AnsibleModule
+from ansible.module_utils.openstack import openstack_full_argument_spec, openstack_module_kwargs
+
 
 _action_map = {'stop': 'SHUTOFF',
                'start': 'ACTIVE',
@@ -97,7 +105,7 @@ _action_map = {'stop': 'SHUTOFF',
 
 _admin_actions = ['pause', 'unpause', 'suspend', 'resume', 'lock', 'unlock']
 
-def _wait(timeout, cloud, server, action):
+def _wait(timeout, cloud, server, action, module):
     """Wait for the server to reach the desired state for the given action."""
 
     for count in shade._utils._iterate_timeout(
@@ -161,7 +169,7 @@ def main():
 
             cloud.nova_client.servers.stop(server=server.id)
             if wait:
-                _wait(timeout, cloud, server, action)
+                _wait(timeout, cloud, server, action, module)
                 module.exit_json(changed=True)
 
         if action == 'start':
@@ -170,7 +178,7 @@ def main():
 
             cloud.nova_client.servers.start(server=server.id)
             if wait:
-                _wait(timeout, cloud, server, action)
+                _wait(timeout, cloud, server, action, module)
                 module.exit_json(changed=True)
 
         if action == 'pause':
@@ -179,7 +187,7 @@ def main():
 
             cloud.nova_client.servers.pause(server=server.id)
             if wait:
-                _wait(timeout, cloud, server, action)
+                _wait(timeout, cloud, server, action, module)
                 module.exit_json(changed=True)
 
         elif action == 'unpause':
@@ -188,7 +196,7 @@ def main():
 
             cloud.nova_client.servers.unpause(server=server.id)
             if wait:
-                _wait(timeout, cloud, server, action)
+                _wait(timeout, cloud, server, action, module)
             module.exit_json(changed=True)
 
         elif action == 'lock':
@@ -207,7 +215,7 @@ def main():
 
             cloud.nova_client.servers.suspend(server=server.id)
             if wait:
-                _wait(timeout, cloud, server, action)
+                _wait(timeout, cloud, server, action, module)
             module.exit_json(changed=True)
 
         elif action == 'resume':
@@ -216,7 +224,7 @@ def main():
 
             cloud.nova_client.servers.resume(server=server.id)
             if wait:
-                _wait(timeout, cloud, server, action)
+                _wait(timeout, cloud, server, action, module)
             module.exit_json(changed=True)
 
         elif action == 'rebuild':
@@ -228,14 +236,12 @@ def main():
             # rebuild doesn't set a state, just do it
             cloud.nova_client.servers.rebuild(server=server.id, image=image.id)
             if wait:
-                _wait(timeout, cloud, server, action)
+                _wait(timeout, cloud, server, action, module)
             module.exit_json(changed=True)
 
     except shade.OpenStackCloudException as e:
         module.fail_json(msg=str(e), extra_data=e.extra_data)
 
-# this is magic, see lib/ansible/module_common.py
-from ansible.module_utils.basic import *
-from ansible.module_utils.openstack import *
+
 if __name__ == '__main__':
     main()

@@ -15,19 +15,20 @@
 # You should have received a copy of the GNU General Public License
 # along with Ansible.  If not, see <http://www.gnu.org/licenses/>.
 #
-ANSIBLE_METADATA = {'status': ['preview'],
-                    'supported_by': 'core',
-                    'version': '1.0'}
+ANSIBLE_METADATA = {'metadata_version': '1.0',
+                    'status': ['preview'],
+                    'supported_by': 'core'}
+
 
 DOCUMENTATION = """
 ---
 module: iosxr_facts
 version_added: "2.2"
 author: "Ricardo Carrillo Cruz (@rcarrillocruz)"
-short_description: Collect facts from remote devices running IOS-XR
+short_description: Collect facts from remote devices running IOS XR
 description:
   - Collects a base set of device facts from a remote device that
-    is running iosxr.  This module prepends all of the
+    is running IOS XR.  This module prepends all of the
     base network fact keys with C(ansible_net_<fact>).  The facts
     module will always collect a base set of facts from the device
     and can enable or disable collection of additional facts.
@@ -122,9 +123,10 @@ ansible_net_neighbors:
 import re
 
 from ansible.module_utils.iosxr import run_commands
-from ansible.module_utils.local import LocalAnsibleModule
+from ansible.module_utils.basic import AnsibleModule
 from ansible.module_utils.six import iteritems
 from ansible.module_utils.six.moves import zip
+from ansible.module_utils.iosxr import iosxr_argument_spec, check_args
 
 
 class FactsBase(object):
@@ -166,17 +168,17 @@ class Default(FactsBase):
 class Hardware(FactsBase):
 
     def commands(self):
-        return(['dir /all | include Directory', 'show memory summary'])
+        return(['dir /all', 'show memory summary'])
 
     def populate(self, results):
         self.facts['filesystems'] = self.parse_filesystems(
-            results['dir /all | include Directory'])
+            results['dir /all'])
 
-        match = re.search(r'Physical Memory (\d+)M total \((\d+)',
+        match = re.search(r'Physical Memory: (\d+)M total \((\d+)',
             results['show memory summary'])
         if match:
-            self.facts['memtotal_mb'] = int(match[0])
-            self.facts['memfree_mb'] = int(match[1])
+            self.facts['memtotal_mb'] = match.group(1)
+            self.facts['memfree_mb'] = match.group(2)
 
     def parse_filesystems(self, data):
         return re.findall(r'^Directory of (\S+)', data, re.M)
@@ -237,6 +239,8 @@ class Interfaces(FactsBase):
 
     def populate_ipv6_interfaces(self, data):
         for key, value in iteritems(data):
+            if key in ['No', 'RPF'] or key.startswith('IP'):
+                continue
             self.facts['interfaces'][key]['ipv6'] = list()
             addresses = re.findall(r'\s+(.+), subnet', value, re.M)
             subnets = re.findall(r', subnet is (.+)$', value, re.M)
@@ -359,7 +363,13 @@ def main():
         gather_subset=dict(default=['!config'], type='list')
     )
 
-    module = LocalAnsibleModule(argument_spec=spec, supports_check_mode=True)
+    spec.update(iosxr_argument_spec)
+
+    module = AnsibleModule(argument_spec=spec,
+                           supports_check_mode=True)
+
+    warnings = list()
+    check_args(module, warnings)
 
     gather_subset = module.params['gather_subset']
 
@@ -416,7 +426,7 @@ def main():
         key = 'ansible_net_%s' % key
         ansible_facts[key] = value
 
-    module.exit_json(ansible_facts=ansible_facts)
+    module.exit_json(ansible_facts=ansible_facts, warnings=warnings)
 
 
 if __name__ == '__main__':

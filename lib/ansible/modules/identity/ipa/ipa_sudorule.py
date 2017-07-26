@@ -15,9 +15,10 @@
 # You should have received a copy of the GNU General Public License
 # along with Ansible.  If not, see <http://www.gnu.org/licenses/>.
 
-ANSIBLE_METADATA = {'status': ['preview'],
-                    'supported_by': 'community',
-                    'version': '1.0'}
+ANSIBLE_METADATA = {'metadata_version': '1.0',
+                    'status': ['preview'],
+                    'supported_by': 'community'}
+
 
 DOCUMENTATION = '''
 ---
@@ -118,7 +119,7 @@ version_added: "2.3"
 '''
 
 EXAMPLES = '''
-# Ensure sudo rule is present thats allows all every body to execute any command on any host without beeing asked for a password.
+# Ensure sudo rule is present that's allows all every body to execute any command on any host without being asked for a password.
 - ipa_sudorule:
     name: sudo_all_nopasswd
     cmdcategory: all
@@ -246,21 +247,6 @@ def get_sudorule_dict(cmdcategory=None, description=None, hostcategory=None, ipa
     return data
 
 
-def get_sudorule_diff(ipa_sudorule, module_sudorule):
-    data = []
-    for key in module_sudorule.keys():
-        module_value = module_sudorule.get(key, None)
-        ipa_value = ipa_sudorule.get(key, None)
-        if isinstance(ipa_value, list) and not isinstance(module_value, list):
-            module_value = [module_value]
-        if isinstance(ipa_value, list) and isinstance(module_value, list):
-            ipa_value = sorted(ipa_value)
-            module_value = sorted(module_value)
-        if ipa_value != module_value:
-            data.append(key)
-    return data
-
-
 def category_changed(module, client, category_name, ipa_sudorule):
     if ipa_sudorule.get(category_name, None) == ['all']:
         if not module.check_mode:
@@ -303,7 +289,7 @@ def ensure(module, client):
             if not module.check_mode:
                 ipa_sudorule = client.sudorule_add(name=name, item=module_sudorule)
         else:
-            diff = get_sudorule_diff(client, ipa_sudorule, module_sudorule)
+            diff = client.get_diff(ipa_sudorule, module_sudorule)
             if len(diff) > 0:
                 changed = True
                 if not module.check_mode:

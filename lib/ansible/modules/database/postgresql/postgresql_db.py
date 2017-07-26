@@ -16,9 +16,10 @@
 # You should have received a copy of the GNU General Public License
 # along with Ansible.  If not, see <http://www.gnu.org/licenses/>.
 
-ANSIBLE_METADATA = {'status': ['stableinterface'],
-                    'supported_by': 'community',
-                    'version': '1.0'}
+ANSIBLE_METADATA = {'metadata_version': '1.0',
+                    'status': ['stableinterface'],
+                    'supported_by': 'community'}
+
 
 DOCUMENTATION = '''
 ---
@@ -33,36 +34,11 @@ options:
       - name of the database to add or remove
     required: true
     default: null
-  login_user:
-    description:
-      - The username used to authenticate with
-    required: false
-    default: null
-  login_password:
-    description:
-      - The password used to authenticate with
-    required: false
-    default: null
-  login_host:
-    description:
-      - Host running the database
-    required: false
-    default: localhost
-  login_unix_socket:
-    description:
-      - Path to a Unix domain socket for local connections
-    required: false
-    default: null
   owner:
     description:
       - Name of the role to set as owner of the database
     required: false
     default: null
-  port:
-    description:
-      - Database port to connect to.
-    required: false
-    default: 5432
   template:
     description:
       - Template used to create the database
@@ -80,36 +56,33 @@ options:
     default: null
   lc_ctype:
     description:
-      - Character classification (LC_CTYPE) to use in the database (e.g. lower, upper, ...) Must match LC_CTYPE of template database unless C(template0) is used as template.
+      - Character classification (LC_CTYPE) to use in the database (e.g. lower, upper, ...) Must match LC_CTYPE of template database unless C(template0)
+        is used as template.
     required: false
     default: null
   state:
-    description:
-      - The database state
+    description: |
+        The database state. present implies that the database should be created if necessary.
+        absent implies that the database should be removed if present.
+        dump requires a target definition to which the database will be backed up.
+        (Added in 2.4) restore also requires a target definition from which the database will be restored.
+        (Added in 2.4) The format of the backup will be detected based on the target name.
+        Supported compression formats for dump and restore are: .bz2, .gz, and .xz
+        Supported formats for dump and restore are: .sql and .tar
     required: false
     default: present
-    choices: [ "present", "absent" ]
-  ssl_mode:
+    choices: [ "present", "absent", "dump", "restore" ]
+  target:
+    version_added: "2.4"
     description:
-      - Determines whether or with what priority a secure SSL TCP/IP connection will be negotiated with the server.
-      - See https://www.postgresql.org/docs/current/static/libpq-ssl.html for more information on the modes.
-    required: false
-    default: disable
-    choices: [disable, allow, prefer, require, verify-ca, verify-full]
-    version_added: '2.3'
-  ssl_rootcert:
+      - File to back up or restore from. Used when state is "dump" or "restore"
+  target_opts:
+    version_added: "2.4"
     description:
-      - Specifies the name of a file containing SSL certificate authority (CA) certificate(s). If the file exists, the server's certificate will be verified to be signed by one of these authorities.
-    required: false
-    default: null
-    version_added: '2.3'
-notes:
-   - The default authentication assumes that you are either logging in as or sudo'ing to the C(postgres) account on the host.
-   - This module uses I(psycopg2), a Python PostgreSQL database adapter. You must ensure that psycopg2 is installed on
-     the host before using this module. If the remote host is the PostgreSQL server (which is the default case), then PostgreSQL must also be installed on the remote host. For Ubuntu-based systems, install the C(postgresql), C(libpq-dev), and C(python-psycopg2) packages on the remote host before using this module.
-   - The ssl_rootcert parameter requires at least Postgres version 8.4 and I(psycopg2) version 2.4.3.
-requirements: [ psycopg2 ]
+      - Further arguments for pg_dump or pg_restore. Used when state is "dump" or "restore"
 author: "Ansible Core Team"
+extends_documentation_fragment:
+- postgres
 '''
 
 EXAMPLES = '''
@@ -126,16 +99,47 @@ EXAMPLES = '''
     lc_collate: de_DE.UTF-8
     lc_ctype: de_DE.UTF-8
     template: template0
+
+# Dump an existing database to a file
+- postgresql_db:
+    name: acme
+    state: dump
+    target: /tmp/acme.sql
+
+# Dump an existing database to a file (with compression)
+- postgresql_db:
+    name: acme
+    state: dump
+    target: /tmp/acme.sql.gz
+
+# Dump a single schema for an existing database
+- postgresql_db:
+    name: acme
+    state: dump
+    target: /tmp/acme.sql
+    target_opts: "-n public"
 '''
 
+HAS_PSYCOPG2 = False
 try:
     import psycopg2
     import psycopg2.extras
+    import pipes
+    import subprocess
+    import os
+
 except ImportError:
-    postgresqldb_found = False
+    pass
 else:
-    postgresqldb_found = True
+    HAS_PSYCOPG2 = True
 from ansible.module_utils.six import iteritems
+
+import traceback
+
+import ansible.module_utils.postgres as pgutils
+from ansible.module_utils.database import SQLParseError, pg_quote_identifier
+from ansible.module_utils.basic import get_exception, AnsibleModule
+
 
 class NotSupportedError(Exception):
     pass
@@ -201,7 +205,7 @@ def db_create(cursor, db, owner, template, encoding, lc_collate, lc_ctype):
     else:
         db_info = get_db_info(cursor, db)
         if (encoding and
-            get_encoding_id(cursor, encoding) != db_info['encoding_id']):
+                get_encoding_id(cursor, encoding) != db_info['encoding_id']):
             raise NotSupportedError(
                 'Changing database encoding is not supported. '
                 'Current encoding: %s' % db_info['encoding']
@@ -227,7 +231,7 @@ def db_matches(cursor, db, owner, template, encoding, lc_collate, lc_ctype):
     else:
         db_info = get_db_info(cursor, db)
         if (encoding and
-            get_encoding_id(cursor, encoding) != db_info['encoding_id']):
+                get_encoding_id(cursor, encoding) != db_info['encoding_id']):
             return False
         elif lc_collate and lc_collate != db_info['lc_collate']:
             return False
@@ -238,32 +242,147 @@ def db_matches(cursor, db, owner, template, encoding, lc_collate, lc_ctype):
         else:
             return True
 
+def db_dump(module, target, target_opts="",
+            db=None,
+            user=None,
+            password=None,
+            host=None,
+            port=None,
+            **kw):
+
+    flags = login_flags(db, host, port, user, db_prefix=False)
+    cmd = module.get_bin_path('pg_dump', True)
+    comp_prog_path = None
+
+    if os.path.splitext(target)[-1] == '.tar':
+        flags.append(' --format=t')
+    if os.path.splitext(target)[-1] == '.gz':
+        if module.get_bin_path('pigz'):
+            comp_prog_path = module.get_bin_path('pigz', True)
+        else:
+            comp_prog_path = module.get_bin_path('gzip', True)
+    elif os.path.splitext(target)[-1] == '.bz2':
+        comp_prog_path = module.get_bin_path('bzip2', True)
+    elif os.path.splitext(target)[-1] == '.xz':
+        comp_prog_path = module.get_bin_path('xz', True)
+
+    cmd += "".join(flags)
+    if target_opts:
+        cmd += " {0} ".format(target_opts)
+
+    if comp_prog_path:
+        cmd = '{0}|{1} > {2}'.format(cmd, comp_prog_path, pipes.quote(target))
+    else:
+        cmd = '{0} > {1}'.format(cmd, pipes.quote(target))
+
+    return do_with_password(module, cmd, password)
+
+def db_restore(module, target, target_opts="",
+            db=None,
+            user=None,
+            password=None,
+            host=None,
+            port=None,
+            **kw):
+
+    flags = login_flags(db, host, port, user)
+    comp_prog_path = None
+    cmd = module.get_bin_path('psql', True)
+
+    if os.path.splitext(target)[-1] == '.sql':
+        flags.append(' --file={0}'.format(target))
+
+    elif os.path.splitext(target)[-1] == '.tar':
+        flags.append(' --format=Tar')
+        cmd = module.get_bin_path('pg_restore', True)
+
+    elif os.path.splitext(target)[-1] == '.gz':
+        comp_prog_path = module.get_bin_path('zcat', True)
+
+    elif os.path.splitext(target)[-1] == '.bz2':
+        comp_prog_path = module.get_bin_path('bzcat', True)
+
+    elif os.path.splitext(target)[-1] == '.xz':
+        comp_prog_path = module.get_bin_path('xzcat', True)
+
+    cmd += "".join(flags)
+    if target_opts:
+        cmd += " {0} ".format(target_opts)
+
+    if comp_prog_path:
+        env = os.environ.copy()
+        if password:
+            env = {"PGPASSWORD": password}
+        p1 = subprocess.Popen([comp_prog_path, target], stdout=subprocess.PIPE, stderr=subprocess.PIPE)
+        p2 = subprocess.Popen(cmd, stdin=p1.stdout, stdout=subprocess.PIPE, stderr=subprocess.PIPE, shell=True, env=env)
+        (stdout2, stderr2) = p2.communicate()
+        p1.stdout.close()
+        p1.wait()
+        if p1.returncode != 0:
+            stderr1 = p1.stderr.read()
+            return p1.returncode, '', stderr1, 'cmd: ****'
+        else:
+            return p2.returncode, '', stderr2, 'cmd: ****'
+    else:
+        cmd = '{0} < {1}'.format(cmd, pipes.quote(target))
+
+    return do_with_password(module, cmd, password)
+
+def login_flags(db, host, port, user, db_prefix=True):
+    """
+    returns a list of connection argument strings each prefixed
+    with a space and quoted where necessary to later be combined
+    in a single shell string with `"".join(rv)`
+
+    db_prefix determines if "--dbname" is prefixed to the db argument,
+    since the argument was introduced in 9.3.
+    """
+    flags = []
+    if db:
+        if db_prefix:
+            flags.append(' --dbname={0}'.format(pipes.quote(db)))
+        else:
+            flags.append(' {0}'.format(pipes.quote(db)))
+    if host:
+        flags.append(' --host={0}'.format(host))
+    if port:
+        flags.append(' --port={0}'.format(port))
+    if user:
+        flags.append(' --username={0}'.format(user))
+    return flags
+
+def do_with_password(module, cmd, password):
+    env = {}
+    if password:
+        env = {"PGPASSWORD": password}
+    rc, stderr, stdout = module.run_command(cmd, use_unsafe_shell=True, environ_update=env)
+    return rc, stderr, stdout, cmd
+
 # ===========================================
 # Module execution.
 #
 
 def main():
+    argument_spec = pgutils.postgres_common_argument_spec()
+    argument_spec.update(dict(
+        db=dict(required=True, aliases=['name']),
+        owner=dict(default=""),
+        template=dict(default=""),
+        encoding=dict(default=""),
+        lc_collate=dict(default=""),
+        lc_ctype=dict(default=""),
+        state=dict(default="present", choices=["absent", "present", "dump", "restore"]),
+        target=dict(default=""),
+        target_opts=dict(default=""),
+    ))
+
+
     module = AnsibleModule(
-        argument_spec=dict(
-            login_user=dict(default="postgres"),
-            login_password=dict(default="", no_log=True),
-            login_host=dict(default=""),
-            login_unix_socket=dict(default=""),
-            port=dict(default="5432"),
-            db=dict(required=True, aliases=['name']),
-            owner=dict(default=""),
-            template=dict(default=""),
-            encoding=dict(default=""),
-            lc_collate=dict(default=""),
-            lc_ctype=dict(default=""),
-            state=dict(default="present", choices=["absent", "present"]),
-            ssl_mode=dict(default="disable", choices=['disable', 'allow', 'prefer', 'require', 'verify-ca', 'verify-full']),
-            ssl_rootcert=dict(default=None),
-        ),
+        argument_spec=argument_spec,
         supports_check_mode = True
     )
 
-    if not postgresqldb_found:
+    if not HAS_PSYCOPG2:
         module.fail_json(msg="the python psycopg2 module is required")
 
     db = module.params["db"]
@@ -273,6 +392,8 @@ def main():
     encoding = module.params["encoding"]
     lc_collate = module.params["lc_collate"]
     lc_ctype = module.params["lc_ctype"]
+    target = module.params["target"]
+    target_opts = module.params["target_opts"]
     state = module.params["state"]
     sslrootcert = module.params["ssl_rootcert"]
     changed = False
@@ -293,41 +414,48 @@ def main():
 
     # If a login_unix_socket is specified, incorporate it here.
     is_localhost = "host" not in kw or kw["host"] == "" or kw["host"] == "localhost"
+
     if is_localhost and module.params["login_unix_socket"] != "":
         kw["host"] = module.params["login_unix_socket"]
 
-    if psycopg2.__version__ < '2.4.3' and sslrootcert is not None:
-        module.fail_json(msg='psycopg2 must be at least 2.4.3 in order to user the ssl_rootcert parameter')
+    if target == "":
+        target = "{0}/{1}.sql".format(os.getcwd(), db)
+        target = os.path.expanduser(target)
+    else:
+        target = os.path.expanduser(target)
 
     try:
+        pgutils.ensure_libs(sslrootcert=module.params.get('ssl_rootcert'))
         db_connection = psycopg2.connect(database="postgres", **kw)
+
         # Enable autocommit so we can create databases
         if psycopg2.__version__ >= '2.4.2':
             db_connection.autocommit = True
         else:
-            db_connection.set_isolation_level(psycopg2
-                                              .extensions
-                                              .ISOLATION_LEVEL_AUTOCOMMIT)
-        cursor = db_connection.cursor(
-            cursor_factory=psycopg2.extras.DictCursor)
+            db_connection.set_isolation_level(psycopg2.extensions.ISOLATION_LEVEL_AUTOCOMMIT)
+        cursor = db_connection.cursor(cursor_factory=psycopg2.extras.DictCursor)
+
+    except pgutils.LibraryError:
+        e = get_exception()
+        module.fail_json(msg="unable to connect to database: {0}".format(str(e)), exception=traceback.format_exc())
 
     except TypeError:
         e = get_exception()
         if 'sslrootcert' in e.args[0]:
-            module.fail_json(msg='Postgresql server must be at least version 8.4 to support sslrootcert')
-        module.fail_json(msg="unable to connect to database: %s" % e)
+            module.fail_json(msg='Postgresql server must be at least version 8.4 to support sslrootcert. Exception: {0}'.format(e),
+                             exception=traceback.format_exc())
+        module.fail_json(msg="unable to connect to database: %s" % e, exception=traceback.format_exc())
 
     except Exception:
         e = get_exception()
-        module.fail_json(msg="unable to connect to database: %s" % e)
+        module.fail_json(msg="unable to connect to database: %s" % e, exception=traceback.format_exc())
 
     try:
         if module.check_mode:
             if state == "absent":
                 changed = db_exists(cursor, db)
             elif state == "present":
-                changed = not db_matches(cursor, db, owner, template, encoding,
-                                         lc_collate, lc_ctype)
+                changed = not db_matches(cursor, db, owner, template, encoding, lc_collate, lc_ctype)
             module.exit_json(changed=changed, db=db)
 
         if state == "absent":
@@ -339,11 +467,23 @@ def main():
 
         elif state == "present":
             try:
-                changed = db_create(cursor, db, owner, template, encoding,
-                                lc_collate, lc_ctype)
+                changed = db_create(cursor, db, owner, template, encoding, lc_collate, lc_ctype)
             except SQLParseError:
                 e = get_exception()
                 module.fail_json(msg=str(e))
+
+        elif state in ("dump", "restore"):
+            method = state == "dump" and db_dump or db_restore
+            try:
+                rc, stdout, stderr, cmd = method(module, target, target_opts, db, **kw)
+                if rc != 0:
+                    module.fail_json(msg=stderr, stdout=stdout, rc=rc, cmd=cmd)
+                else:
+                    module.exit_json(changed=True, msg=stdout, stderr=stderr, rc=rc, cmd=cmd)
+            except SQLParseError:
+                e = get_exception()
+                module.fail_json(msg=str(e))
+
     except NotSupportedError:
         e = get_exception()
         module.fail_json(msg=str(e))
@@ -356,8 +496,5 @@ def main():
 
     module.exit_json(changed=changed, db=db)
 
-# import module snippets
-from ansible.module_utils.basic import *
-from ansible.module_utils.database import *
 if __name__ == '__main__':
     main()

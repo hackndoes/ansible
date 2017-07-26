@@ -18,9 +18,10 @@
 # You should have received a copy of the GNU General Public License
 # along with Ansible.  If not, see <http://www.gnu.org/licenses/>.
 
-ANSIBLE_METADATA = {'status': ['deprecated'],
-                    'supported_by': 'community',
-                    'version': '1.0'}
+ANSIBLE_METADATA = {'metadata_version': '1.0',
+                    'status': ['deprecated'],
+                    'supported_by': 'community'}
+
 
 DOCUMENTATION = '''
 ---
@@ -196,7 +197,7 @@ def daemonize_self(module, password, port, minutes, pid_file):
         log('fork #2 failed: %d (%s)' % (e.errno, e.strerror))
         sys.exit(1)
 
-    dev_null = file('/dev/null','rw')
+    dev_null = open('/dev/null','rw')
     os.dup2(dev_null.fileno(), sys.stdin.fileno())
     os.dup2(dev_null.fileno(), sys.stdout.fileno())
     os.dup2(dev_null.fileno(), sys.stderr.fileno())
@@ -501,7 +502,7 @@ class ThreadedTCPRequestHandler(SocketServer.BaseRequestHandler):
             return dict(failed=True, msg='internal error: in_path is required')
 
         try:
-            fd = file(data['in_path'], 'rb')
+            fd = open(data['in_path'], 'rb')
             fstat = os.stat(data['in_path'])
             vvv("FETCH file is %d bytes" % fstat.st_size)
             while fd.tell() < fstat.st_size:

@@ -15,9 +15,10 @@
 # along with Ansible.  If not, see <http://www.gnu.org/licenses/>.
 
 
-ANSIBLE_METADATA = {'status': ['preview'],
-                    'supported_by': 'community',
-                    'version': '1.0'}
+ANSIBLE_METADATA = {'metadata_version': '1.0',
+                    'status': ['preview'],
+                    'supported_by': 'community'}
+
 
 DOCUMENTATION = '''
 ---
@@ -34,10 +35,11 @@ options: {}
 
 EXAMPLES = '''
 - name: Gather facts from xenserver
-   xenserver:
+  xenserver:
 
 - name: Print running VMs
-  debug: msg="{{ item }}"
+  debug:
+    msg: "{{ item }}"
   with_items: "{{ xs_vms.keys() }}"
   when: xs_vms[item]['power_state'] == "Running"
 

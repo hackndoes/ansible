@@ -21,9 +21,10 @@
 # along with Ansible.  If not, see <http://www.gnu.org/licenses/>.
 
 
-ANSIBLE_METADATA = {'status': ['preview'],
-                    'supported_by': 'core',
-                    'version': '1.0'}
+ANSIBLE_METADATA = {'metadata_version': '1.0',
+                    'status': ['preview'],
+                    'supported_by': 'core'}
+
 
 DOCUMENTATION = '''
 ---
@@ -209,6 +210,7 @@ class SourcesList(object):
             if filename is not None:
                 return filename
             return '_'.join(re.sub('[^a-zA-Z0-9]', ' ', s).split())
+
         def _strip_username_password(s):
             if '@' in s:
                 s = s.split('@', 1)

@@ -21,9 +21,10 @@
 #
 
 
-ANSIBLE_METADATA = {'status': ['preview'],
-                    'supported_by': 'committer',
-                    'version': '1.0'}
+ANSIBLE_METADATA = {'metadata_version': '1.0',
+                    'status': ['preview'],
+                    'supported_by': 'community'}
+
 
 DOCUMENTATION = '''
 ---
@@ -93,7 +94,7 @@ requirements:
     - "docker-py >= 1.7.0"
     - "Docker API >= 1.20"
     - 'Only to be able to logout (state=absent): the docker command line utility'
-authors:
+author:
     - "Olaf Kilian <olaf.kilian@symanex.com>"
     - "Chris Houseknecht (@chouseknecht)"
     - "James Tanner (@jctanner)"
@@ -142,6 +143,7 @@ login_results:
 
 import base64
 
+from ansible.module_utils._text import to_bytes, to_text
 from ansible.module_utils.docker_common import *
 
 
@@ -275,8 +277,13 @@ class LoginManager(DockerBaseClass):
             self.log("Adding registry_url %s to auths." % (self.registry_url))
             config['auths'][self.registry_url] = dict()
 
+        b64auth = base64.b64encode(
+            to_bytes(self.username) + b':' + to_bytes(self.password)
+        )
+        auth = to_text(b64auth)
+
         encoded_credentials = dict(
-            auth=base64.b64encode(self.username + b':' + self.password),
+            auth=auth,
             email=self.email
         )
 

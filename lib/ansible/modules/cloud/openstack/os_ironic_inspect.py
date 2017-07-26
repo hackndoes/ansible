@@ -16,9 +16,10 @@
 # You should have received a copy of the GNU General Public License
 # along with this software.  If not, see <http://www.gnu.org/licenses/>.
 
-ANSIBLE_METADATA = {'status': ['preview'],
-                    'supported_by': 'community',
-                    'version': '1.0'}
+ANSIBLE_METADATA = {'metadata_version': '1.0',
+                    'status': ['preview'],
+                    'supported_by': 'community'}
+
 
 DOCUMENTATION = '''
 ---
@@ -58,6 +59,10 @@ options:
         - A timeout in seconds to tell the role to wait for the node to complete introspection if wait is set to True.
       required: false
       default: 1200
+    availability_zone:
+      description:
+        - Ignored. Present for backwards compatibility
+      required: false
 
 requirements: ["shade"]
 '''
@@ -66,7 +71,7 @@ RETURN = '''
 ansible_facts:
     description: Dictionary of new facts representing discovered properties of the node..
     returned: changed
-    type: dictionary
+    type: complex
     contains:
         memory_mb:
             description: Amount of node memory as updated in the node properties

@@ -20,9 +20,10 @@
 # along with Ansible.  If not, see <http://www.gnu.org/licenses/>.
 #
 
-ANSIBLE_METADATA = {'status': ['stableinterface'],
-                    'supported_by': 'core',
-                    'version': '1.0'}
+ANSIBLE_METADATA = {'metadata_version': '1.0',
+                    'status': ['stableinterface'],
+                    'supported_by': 'core'}
+
 
 DOCUMENTATION = '''
 ---
@@ -117,7 +118,10 @@ EXAMPLES = '''
 
 import os
 import tempfile
-from ansible.module_utils.basic import get_platform, get_exception, AnsibleModule, BOOLEANS_TRUE, BOOLEANS_FALSE
+
+from ansible.module_utils.basic import get_platform, AnsibleModule
+from ansible.module_utils.six import string_types
+from ansible.module_utils.parsing.convert_bool import BOOLEANS_FALSE, BOOLEANS_TRUE
 
 
 class SysctlModule(object):
@@ -215,7 +219,7 @@ class SysctlModule(object):
                 return '1'
             else:
                 return '0'
-        elif isinstance(value, basestring):
+        elif isinstance(value, string_types):
             if value.lower() in BOOLEANS_TRUE:
                 return '1'
             elif value.lower() in BOOLEANS_FALSE:
@@ -249,8 +253,17 @@ class SysctlModule(object):
         if self.platform == 'openbsd':
             # openbsd doesn't accept -w, but since it's not needed, just drop it
             thiscmd = "%s %s=%s" % (self.sysctl_cmd, token, value)
+        elif self.platform == 'freebsd':
+            ignore_missing = ''
+            if self.args['ignoreerrors']:
+                ignore_missing = '-i'
+            # freebsd doesn't accept -w, but since it's not needed, just drop it
+            thiscmd = "%s %s %s=%s" % (self.sysctl_cmd, ignore_missing, token, value)
         else:
-            thiscmd = "%s -w %s=%s" % (self.sysctl_cmd, token, value)
+            ignore_missing = ''
+            if self.args['ignoreerrors']:
+                ignore_missing = '-e'
+            thiscmd = "%s %s -w %s=%s" % (self.sysctl_cmd, ignore_missing, token, value)
         rc,out,err = self.module.run_command(thiscmd)
         if rc != 0:
             self.module.fail_json(msg='setting %s failed: %s' % (token, out + err))
@@ -298,8 +311,7 @@ class SysctlModule(object):
                 f = open(self.sysctl_file, "r")
                 lines = f.readlines()
                 f.close()
-            except IOError:
-                e = get_exception()
+            except IOError as e:
                 self.module.fail_json(msg="Failed to open %s: %s" % (self.sysctl_file, str(e)))
 
         for line in lines:
@@ -307,7 +319,7 @@ class SysctlModule(object):
             self.file_lines.append(line)
 
             # don't split empty lines or comments
-            if not line or line.startswith("#"):
+            if not line or line.startswith(("#", ";")):
                 continue
 
             k, v = line.split('=',1)
@@ -320,11 +332,11 @@ class SysctlModule(object):
         checked = []
         self.fixed_lines = []
         for line in self.file_lines:
-            if not line.strip() or line.strip().startswith("#"):
+            if not line.strip() or line.strip().startswith(("#", ";")):
                 self.fixed_lines.append(line)
                 continue
             tmpline = line.strip()
-            k, v = line.split('=',1)
+            k, v = tmpline.split('=',1)
             k = k.strip()
             v = v.strip()
             if k not in checked:
@@ -349,8 +361,7 @@ class SysctlModule(object):
         try:
             for l in self.fixed_lines:
                 f.write(l.strip() + "\n")
-        except IOError:
-            e = get_exception()
+        except IOError as e:
             self.module.fail_json(msg="Failed to write to file %s: %s" % (tmp_path, str(e)))
         f.flush()
         f.close()
@@ -375,8 +386,20 @@ def main():
             ignoreerrors = dict(default=False, type='bool'),
             sysctl_file = dict(default='/etc/sysctl.conf', type='path')
         ),
-        supports_check_mode=True
+        supports_check_mode=True,
+        required_if=[('state', 'present', ['value'])],
     )
+
+    if module.params['name'] is None:
+        module.fail_json(msg="name can not be None")
+    if module.params['state'] == 'present' and module.params['value'] is None:
+        module.fail_json(msg="value can not be None")
+
+    # In case of in-line params
+    if module.params['name'] == '':
+        module.fail_json(msg="name can not be blank")
+    if module.params['state'] == 'present' and module.params['value'] == '':
+        module.fail_json(msg="value can not be blank")
 
     result = SysctlModule(module)
 

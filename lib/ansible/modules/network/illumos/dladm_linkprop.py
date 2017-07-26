@@ -19,9 +19,10 @@
 # along with Ansible. If not, see <http://www.gnu.org/licenses/>.
 #
 
-ANSIBLE_METADATA = {'status': ['preview'],
-                    'supported_by': 'community',
-                    'version': '1.0'}
+ANSIBLE_METADATA = {'metadata_version': '1.0',
+                    'status': ['preview'],
+                    'supported_by': 'community'}
+
 
 DOCUMENTATION = '''
 ---
@@ -35,32 +36,28 @@ options:
     link:
         description:
             - Link interface name.
-        type: str
         required: true
         aliases: [ "nic", "interface" ]
     property:
         description:
             - Specifies the name of the property we want to manage.
-        type: str
         required: true
         aliases: [ "name" ]
     value:
         description:
             - Specifies the value we want to set for the link property.
-        type: str
         required: false
     temporary:
         description:
             - Specifies that lin property configuration is temporary. Temporary
               link property configuration does not persist across reboots.
         required: false
-        type: boolean
+        type: bool
         default: false
     state:
         description:
             - Set or reset the property value.
         required: false
-        type: str
         default: "present"
         choices: [ "present", "absent", "reset" ]
 '''
@@ -234,7 +231,7 @@ def main():
             link=dict(required=True, default=None, type='str', aliases=['nic', 'interface']),
             property=dict(required=True, type='str', aliases=['name']),
             value=dict(required=False, type='str'),
-            temporary=dict(default=False, type='bool', choices=BOOLEANS),
+            temporary=dict(default=False, type='bool'),
             state=dict(
                 default='present', choices=['absent', 'present', 'reset']),
         ),
@@ -299,7 +296,6 @@ def main():
         result['stderr'] = err
 
     module.exit_json(**result)
-
 
 
 if __name__ == '__main__':

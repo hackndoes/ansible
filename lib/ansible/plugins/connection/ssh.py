@@ -17,6 +17,84 @@
 # You should have received a copy of the GNU General Public License
 # along with Ansible.  If not, see <http://www.gnu.org/licenses/>.
 #
+'''
+DOCUMENTATION:
+    connection: ssh
+    short_description: connect via ssh client binary
+    description:
+        - This connection plugin allows ansible to communicate to the target machines via normal ssh command line.
+    author: ansible (@core)
+    version_added: historical
+    options:
+        _host:
+            description: Hostname/ip to connect to.
+            default: inventory_hostname
+            host_vars:
+                 - ansible_host
+                 - ansible_ssh_host
+        _host_key_checking:
+            type: bool
+            description: Determines if ssh should check host keys
+            config:
+                - section: defaults
+                  key: 'host_key_checking'
+            env_vars:
+                - ANSIBLE_HOST_KEY_CHECKING
+        _password:
+            description: Authentication password for the C(remote_user). Can be supplied as CLI option.
+            host_vars:
+                - ansible_password
+                - ansible_ssh_pass
+        _ssh_args:
+            description: Arguments to pass to all ssh cli tools
+            default: '-C -o ControlMaster=auto -o ControlPersist=60s'
+            config:
+                - section: 'ssh_connection'
+                  key: 'ssh_args'
+            env_vars:
+                - ANSIBLE_SSH_ARGS
+        _ssh_common_args:
+            description: Common extra args for ssh CLI tools
+            host_vars:
+                - ansible_ssh_common_args
+        _scp_extra_args:
+            description: Extra exclusive to the 'scp' CLI
+            host_vars:
+                - ansible_scp_extra_args
+        _sftp_extra_args:
+            description: Extra exclusive to the 'sftp' CLI
+            host_vars:
+                - ansible_sftp_extra_args
+        _ssh_extra_args:
+            description: Extra exclusive to the 'ssh' CLI
+            host_vars:
+                - ansible_ssh_extra_args
+        port:
+            description: Remote port to connect to.
+            type: int
+            config:
+               - section: defaults
+                 key: remote_port
+                 default: 22
+            env_vars:
+               - ANSIBLE_REMOTE_PORT
+            host_vars:
+               - ansible_port
+               - ansible_ssh_port
+        remote_user:
+            description:
+                - User name with which to login to the remote server, normally set by the remote_user keyword.
+                - If no user is supplied, Ansible will let the ssh client binary choose the user as it normally
+            config:
+               - section: defaults
+                 key: remote_user
+            env_vars:
+               - ANSIBLE_REMOTE_USER
+            host_vars:
+               - ansible_user
+               - ansible_ssh_user
+'''
+
 from __future__ import (absolute_import, division, print_function)
 __metaclass__ = type
 
@@ -25,21 +103,21 @@ import fcntl
 import hashlib
 import os
 import pty
+import socket
 import subprocess
 import time
 
+from functools import wraps
 from ansible import constants as C
-from ansible.compat import selectors
-from ansible.compat.six import PY3, text_type, binary_type
-from ansible.compat.six.moves import shlex_quote
 from ansible.errors import AnsibleError, AnsibleConnectionFailure, AnsibleFileNotFound
 from ansible.errors import AnsibleOptionsError
-from ansible.module_utils.basic import BOOLEANS
+from ansible.compat import selectors
+from ansible.module_utils.six import PY3, text_type, binary_type
+from ansible.module_utils.six.moves import shlex_quote
 from ansible.module_utils._text import to_bytes, to_native, to_text
+from ansible.module_utils.parsing.convert_bool import BOOLEANS, boolean
 from ansible.plugins.connection import ConnectionBase, BUFSIZE
 from ansible.utils.path import unfrackpath, makedirs_safe
-
-boolean = C.mk_boolean
 
 try:
     from __main__ import display
@@ -47,7 +125,67 @@ except ImportError:
     from ansible.utils.display import Display
     display = Display()
 
+
 SSHPASS_AVAILABLE = None
+
+
+class AnsibleControlPersistBrokenPipeError(AnsibleError):
+    ''' ControlPersist broken pipe '''
+    pass
+
+
+def _ssh_retry(func):
+    """
+    Decorator to retry ssh/scp/sftp in the case of a connection failure
+
+    Will retry if:
+    * an exception is caught
+    * ssh returns 255
+    Will not retry if
+    * remaining_tries is <2
+    * retries limit reached
+    """
+    @wraps(func)
+    def wrapped(self, *args, **kwargs):
+        remaining_tries = int(C.ANSIBLE_SSH_RETRIES) + 1
+        cmd_summary = "%s..." % args[0]
+        for attempt in range(remaining_tries):
+            try:
+                try:
+                    return_tuple = func(self, *args, **kwargs)
+                    display.vvv(return_tuple, host=self.host)
+                    # 0 = success
+                    # 1-254 = remote command return code
+                    # 255 = failure from the ssh command itself
+                except (AnsibleControlPersistBrokenPipeError) as e:
+                    # Retry one more time because of the ControlPersist broken pipe (see #16731)
+                    display.vvv(u"RETRYING BECAUSE OF CONTROLPERSIST BROKEN PIPE")
+                    return_tuple = func(self, *args, **kwargs)
+
+                if return_tuple[0] != 255:
+                    break
+                else:
+                    raise AnsibleConnectionFailure("Failed to connect to the host via ssh: %s" % to_native(return_tuple[2]))
+            except (AnsibleConnectionFailure, Exception) as e:
+                if attempt == remaining_tries - 1:
+                    raise
+                else:
+                    pause = 2 ** attempt - 1
+                    if pause > 30:
+                        pause = 30
+
+                    if isinstance(e, AnsibleConnectionFailure):
+                        msg = "ssh_retry: attempt: %d, ssh return code is 255. cmd (%s), pausing for %d seconds" % (attempt, cmd_summary, pause)
+                    else:
+                        msg = "ssh_retry: attempt: %d, caught exception(%s) from cmd (%s), pausing for %d seconds" % (attempt, e, cmd_summary, pause)
+
+                    display.vv(msg, host=self.host)
+
+                    time.sleep(pause)
+                    continue
+
+        return return_tuple
+    return wrapped
 
 
 class Connection(ConnectionBase):
@@ -72,6 +210,13 @@ class Connection(ConnectionBase):
 
     def _connect(self):
         return self
+
+    def transport_test(self, connect_timeout):
+        ''' Test the transport mechanism, if available '''
+        port = int(self.port or 22)
+        display.vvv("attempting transport test to %s:%s" % (self.host, port))
+        sock = socket.create_connection((self.host, port), connect_timeout)
+        sock.close()
 
     @staticmethod
     def _create_control_path(host, port, user):
@@ -219,12 +364,14 @@ class Connection(ConnectionBase):
 
         user = self._play_context.remote_user
         if user:
-            self._add_args(b_command,
-                    (b"-o", b"User=" + to_bytes(self._play_context.remote_user, errors='surrogate_or_strict')),
+            self._add_args(
+                b_command,
+                (b"-o", b"User=" + to_bytes(self._play_context.remote_user, errors='surrogate_or_strict')),
                 u"ANSIBLE_REMOTE_USER/remote_user/ansible_user/user/-u set"
             )
 
-        self._add_args(b_command,
+        self._add_args(
+            b_command,
             (b"-o", b"ConnectTimeout=" + to_bytes(self._play_context.timeout, errors='surrogate_or_strict', nonstring='simplerepr')),
             u"ANSIBLE_TIMEOUT/timeout set"
         )
@@ -313,7 +460,7 @@ class Connection(ConnectionBase):
             display_line = to_text(b_line).rstrip('\r\n')
             suppress_output = False
 
-            #display.debug("Examining line (source=%s, state=%s): '%s'" % (source, state, display_line))
+            # display.debug("Examining line (source=%s, state=%s): '%s'" % (source, state, display_line))
             if self._play_context.prompt and self.check_password_prompt(b_line):
                 display.debug("become_prompt: (source=%s, state=%s): '%s'" % (source, state, display_line))
                 self._flags['become_prompt'] = True
@@ -344,6 +491,7 @@ class Connection(ConnectionBase):
 
         return b''.join(output), remainder
 
+    @_ssh_retry
     def _run(self, cmd, in_data, sudoable=True, checkrc=True):
         '''
         Starts the command and communicates with it until it ends.
@@ -447,7 +595,7 @@ class Connection(ConnectionBase):
         for fd in (p.stdout, p.stderr):
             fcntl.fcntl(fd, fcntl.F_SETFL, fcntl.fcntl(fd, fcntl.F_GETFL) | os.O_NONBLOCK)
 
-        ### TODO: bcoca would like to use SelectSelector() when open
+        # TODO: bcoca would like to use SelectSelector() when open
         # filehandles is low, then switch to more efficient ones when higher.
         # select is faster when filehandles is low.
         selector = selectors.DefaultSelector()
@@ -462,6 +610,7 @@ class Connection(ConnectionBase):
 
         try:
             while True:
+                poll = p.poll()
                 events = selector.select(timeout)
 
                 # We pay attention to timeouts only while negotiating a prompt.
@@ -471,7 +620,7 @@ class Connection(ConnectionBase):
                     if state <= states.index('awaiting_escalation'):
                         # If the process has already exited, then it's not really a
                         # timeout; we'll let the normal error handling deal with it.
-                        if p.poll() is not None:
+                        if poll is not None:
                             break
                         self._terminate_process(p)
                         raise AnsibleError('Timeout (%ds) waiting for privilege escalation prompt: %s' % (timeout, to_native(b_stdout)))
@@ -573,7 +722,7 @@ class Connection(ConnectionBase):
                 # Now we're awaiting_exit: has the child process exited? If it has,
                 # and we've read all available output from it, we're done.
 
-                if p.poll() is not None:
+                if poll is not None:
                     if not selector.get_map() or not events:
                         break
                     # We should not see further writes to the stdout/stderr file
@@ -599,38 +748,24 @@ class Connection(ConnectionBase):
 
         if C.HOST_KEY_CHECKING:
             if cmd[0] == b"sshpass" and p.returncode == 6:
-                raise AnsibleError('Using a SSH password instead of a key is not possible because Host Key checking is enabled and sshpass does not support this.  Please add this host\'s fingerprint to your known_hosts file to manage this host.')
+                raise AnsibleError('Using a SSH password instead of a key is not possible because Host Key checking is enabled and sshpass does not support '
+                                   'this.  Please add this host\'s fingerprint to your known_hosts file to manage this host.')
 
         controlpersisterror = b'Bad configuration option: ControlPersist' in b_stderr or b'unknown configuration option: ControlPersist' in b_stderr
         if p.returncode != 0 and controlpersisterror:
-            raise AnsibleError('using -c ssh on certain older ssh versions may not support ControlPersist, set ANSIBLE_SSH_ARGS="" (or ssh_args in [ssh_connection] section of the config file) before running again')
+            raise AnsibleError('using -c ssh on certain older ssh versions may not support ControlPersist, set ANSIBLE_SSH_ARGS="" '
+                               '(or ssh_args in [ssh_connection] section of the config file) before running again')
+
+        # If we find a broken pipe because of ControlPersist timeout expiring (see #16731),
+        # we raise a special exception so that we can retry a connection.
+        controlpersist_broken_pipe = b'mux_client_hello_exchange: write packet: Broken pipe' in b_stderr
+        if p.returncode == 255 and controlpersist_broken_pipe:
+            raise AnsibleControlPersistBrokenPipeError('SSH Error: data could not be sent because of ControlPersist broken pipe.')
 
         if p.returncode == 255 and in_data and checkrc:
             raise AnsibleConnectionFailure('SSH Error: data could not be sent to remote host "%s". Make sure this host can be reached over ssh' % self.host)
 
         return (p.returncode, b_stdout, b_stderr)
-
-    def _exec_command(self, cmd, in_data=None, sudoable=True):
-        ''' run a command on the remote host '''
-
-        super(Connection, self).exec_command(cmd, in_data=in_data, sudoable=sudoable)
-
-        display.vvv(u"ESTABLISH SSH CONNECTION FOR USER: {0}".format(self._play_context.remote_user), host=self._play_context.remote_addr)
-
-
-        # we can only use tty when we are not pipelining the modules. piping
-        # data into /usr/bin/python inside a tty automatically invokes the
-        # python interactive-mode but the modules are not compatible with the
-        # interactive-mode ("unexpected indent" mainly because of empty lines)
-        if not in_data and sudoable:
-            args = ('ssh', '-tt', self.host, cmd)
-        else:
-            args = ('ssh', self.host, cmd)
-
-        cmd = self._build_command(*args)
-        (returncode, stdout, stderr) = self._run(cmd, in_data, sudoable=sudoable)
-
-        return (returncode, stdout, stderr)
 
     def _file_transport_command(self, in_path, out_path, sftp_action):
         # scp and sftp require square brackets for IPv6 addresses, but
@@ -655,18 +790,17 @@ class Connection(ConnectionBase):
             if not isinstance(scp_if_ssh, bool):
                 scp_if_ssh = scp_if_ssh.lower()
                 if scp_if_ssh in BOOLEANS:
-                    scp_if_ssh = boolean(scp_if_ssh)
+                    scp_if_ssh = boolean(scp_if_ssh, strict=False)
                 elif scp_if_ssh != 'smart':
                     raise AnsibleOptionsError('scp_if_ssh needs to be one of [smart|True|False]')
             if scp_if_ssh == 'smart':
                 methods = ['sftp', 'scp', 'piped']
-            elif scp_if_ssh == True:
+            elif scp_if_ssh is True:
                 methods = ['scp']
             else:
                 methods = ['sftp']
 
         success = False
-        res = None
         for method in methods:
             returncode = stdout = stderr = None
             if method == 'sftp':
@@ -685,77 +819,57 @@ class Connection(ConnectionBase):
                 if sftp_action == 'get':
                     # we pass sudoable=False to disable pty allocation, which
                     # would end up mixing stdout/stderr and screwing with newlines
-                    (returncode, stdout, stderr) = self._exec_command('dd if=%s bs=%s' % (in_path, BUFSIZE), sudoable=False)
+                    (returncode, stdout, stderr) = self.exec_command('dd if=%s bs=%s' % (in_path, BUFSIZE), sudoable=False)
                     out_file = open(to_bytes(out_path, errors='surrogate_or_strict'), 'wb+')
                     out_file.write(stdout)
                     out_file.close()
                 else:
                     in_data = open(to_bytes(in_path, errors='surrogate_or_strict'), 'rb').read()
                     in_data = to_bytes(in_data, nonstring='passthru')
-                    (returncode, stdout, stderr) = self._exec_command('dd of=%s bs=%s' % (out_path, BUFSIZE), in_data=in_data)
+                    (returncode, stdout, stderr) = self.exec_command('dd of=%s bs=%s' % (out_path, BUFSIZE), in_data=in_data)
 
             # Check the return code and rollover to next method if failed
             if returncode == 0:
-                success = True
-                break
+                return (returncode, stdout, stderr)
             else:
                 # If not in smart mode, the data will be printed by the raise below
                 if len(methods) > 1:
                     display.warning(msg='%s transfer mechanism failed on %s. Use ANSIBLE_DEBUG=1 to see detailed information' % (method, host))
                     display.debug(msg='%s' % to_native(stdout))
                     display.debug(msg='%s' % to_native(stderr))
-                res = (returncode, stdout, stderr)
 
-        if not success:
-            raise AnsibleError("failed to transfer file {0} to {1}:\n{2}\n{3}"\
-            .format(to_native(in_path), to_native(out_path), to_native(res[1]), to_native(res[2])))
+        if returncode == 255:
+            raise AnsibleConnectionFailure("Failed to connect to the host via %s: %s" % (method, to_native(stderr)))
+        else:
+            raise AnsibleError("failed to transfer file to %s %s:\n%s\n%s" %
+                               (to_native(in_path), to_native(out_path), to_native(stdout), to_native(stderr)))
 
     #
     # Main public methods
     #
-    def exec_command(self, *args, **kwargs):
-        """
-        Wrapper around _exec_command to retry in the case of an ssh failure
+    def exec_command(self, cmd, in_data=None, sudoable=True):
+        ''' run a command on the remote host '''
 
-        Will retry if:
-        * an exception is caught
-        * ssh returns 255
-        Will not retry if
-        * remaining_tries is <2
-        * retries limit reached
-        """
+        super(Connection, self).exec_command(cmd, in_data=in_data, sudoable=sudoable)
 
-        remaining_tries = int(C.ANSIBLE_SSH_RETRIES) + 1
-        cmd_summary = "%s..." % args[0]
-        for attempt in range(remaining_tries):
-            try:
-                return_tuple = self._exec_command(*args, **kwargs)
-                # 0 = success
-                # 1-254 = remote command return code
-                # 255 = failure from the ssh command itself
-                if return_tuple[0] != 255:
-                    break
-                else:
-                    raise AnsibleConnectionFailure("Failed to connect to the host via ssh: %s" % to_native(return_tuple[2]))
-            except (AnsibleConnectionFailure, Exception) as e:
-                if attempt == remaining_tries - 1:
-                    raise
-                else:
-                    pause = 2 ** attempt - 1
-                    if pause > 30:
-                        pause = 30
+        display.vvv(u"ESTABLISH SSH CONNECTION FOR USER: {0}".format(self._play_context.remote_user), host=self._play_context.remote_addr)
 
-                    if isinstance(e, AnsibleConnectionFailure):
-                        msg = "ssh_retry: attempt: %d, ssh return code is 255. cmd (%s), pausing for %d seconds" % (attempt, cmd_summary, pause)
-                    else:
-                        msg = "ssh_retry: attempt: %d, caught exception(%s) from cmd (%s), pausing for %d seconds" % (attempt, e, cmd_summary, pause)
+        # we can only use tty when we are not pipelining the modules. piping
+        # data into /usr/bin/python inside a tty automatically invokes the
+        # python interactive-mode but the modules are not compatible with the
+        # interactive-mode ("unexpected indent" mainly because of empty lines)
 
-                    display.vv(msg, host=self.host)
+        ssh_executable = self._play_context.ssh_executable
 
-                    time.sleep(pause)
-                    continue
+        if not in_data and sudoable:
+            args = (ssh_executable, '-tt', self.host, cmd)
+        else:
+            args = (ssh_executable, self.host, cmd)
 
-        return return_tuple
+        cmd = self._build_command(*args)
+        (returncode, stdout, stderr) = self._run(cmd, in_data, sudoable=sudoable)
+
+        return (returncode, stdout, stderr)
 
     def put_file(self, in_path, out_path):
         ''' transfer a file from local to remote '''
@@ -766,7 +880,7 @@ class Connection(ConnectionBase):
         if not os.path.exists(to_bytes(in_path, errors='surrogate_or_strict')):
             raise AnsibleFileNotFound("file or module does not exist: {0}".format(to_native(in_path)))
 
-        self._file_transport_command(in_path, out_path, 'put')
+        return self._file_transport_command(in_path, out_path, 'put')
 
     def fetch_file(self, in_path, out_path):
         ''' fetch a file from remote to local '''
@@ -774,20 +888,21 @@ class Connection(ConnectionBase):
         super(Connection, self).fetch_file(in_path, out_path)
 
         display.vvv(u"FETCH {0} TO {1}".format(in_path, out_path), host=self.host)
-        self._file_transport_command(in_path, out_path, 'get')
+        return self._file_transport_command(in_path, out_path, 'get')
+
+    def reset(self):
+        # If we have a persistent ssh connection (ControlPersist), we can ask it to stop listening.
+        cmd = self._build_command(self._play_context.ssh_executable, '-O', 'stop', self.host)
+        controlpersist, controlpath = self._persistence_controls(cmd)
+        if controlpersist:
+            display.vvv(u'sending stop: %s' % cmd)
+            p = subprocess.Popen(cmd, stdin=subprocess.PIPE, stdout=subprocess.PIPE, stderr=subprocess.PIPE)
+            stdout, stderr = p.communicate()
+            status_code = p.wait()
+            if status_code != 0:
+                raise AnsibleError("Cannot reset connection:\n%s" % stderr)
+
+        self.close()
 
     def close(self):
-        # If we have a persistent ssh connection (ControlPersist), we can ask it
-        # to stop listening. Otherwise, there's nothing to do here.
-
-        # TODO: reenable once winrm issues are fixed
-        # temporarily disabled as we are forced to currently close connections after every task because of winrm
-        # if self._connected and self._persistent:
-        #     ssh_executable = self._play_context.ssh_executable
-        #     cmd = self._build_command('ssh', '-O', 'stop', self.host)
-        #
-        #     cmd = map(to_bytes, cmd)
-        #     p = subprocess.Popen(cmd, stdin=subprocess.PIPE, stdout=subprocess.PIPE, stderr=subprocess.PIPE)
-        #     stdout, stderr = p.communicate()
-
         self._connected = False

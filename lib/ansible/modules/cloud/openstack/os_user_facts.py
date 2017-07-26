@@ -14,9 +14,10 @@
 # You should have received a copy of the GNU General Public License
 # along with this software.  If not, see <http://www.gnu.org/licenses/>.
 
-ANSIBLE_METADATA = {'status': ['preview'],
-                    'supported_by': 'community',
-                    'version': '1.0'}
+ANSIBLE_METADATA = {'metadata_version': '1.0',
+                    'status': ['preview'],
+                    'supported_by': 'community'}
+
 
 DOCUMENTATION = '''
 ---
@@ -46,6 +47,10 @@ options:
           this dictionary may be additional dictionaries.
      required: false
      default: None
+   availability_zone:
+     description:
+       - Ignored. Present for backwards compatibility
+     required: false
 '''
 
 EXAMPLES = '''
@@ -63,16 +68,15 @@ EXAMPLES = '''
     var: openstack_users
 
 # Gather facts about a previously created user in a specific domain
-- os_user_facts
+- os_user_facts:
     cloud: awesomecloud
     name: demouser
     domain: admindomain
 - debug:
     var: openstack_users
 
-# Gather facts about a previously created user in a specific domain
-  with filter
-- os_user_facts
+# Gather facts about a previously created user in a specific domain with filter
+- os_user_facts:
     cloud: awesomecloud
     name: demouser
     domain: admindomain

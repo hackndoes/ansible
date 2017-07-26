@@ -18,9 +18,10 @@
 # You should have received a copy of the GNU General Public License
 # along with Ansible.  If not, see <http://www.gnu.org/licenses/>
 
-ANSIBLE_METADATA = {'status': ['stableinterface'],
-                    'supported_by': 'community',
-                    'version': '1.0'}
+ANSIBLE_METADATA = {'metadata_version': '1.0',
+                    'status': ['stableinterface'],
+                    'supported_by': 'community'}
+
 
 DOCUMENTATION = '''
 ---
@@ -37,7 +38,7 @@ options:
             - Name of the service to manage.
     state:
         required: false
-        choices: [ started, stopped, restarted, reloaded, once ]
+        choices: [ started, stopped, restarted, reloaded, once, killed ]
         description:
             - C(Started)/C(stopped) are idempotent actions that will not run
               commands unless necessary.  C(restarted) will always bounce the

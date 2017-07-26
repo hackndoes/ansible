@@ -19,9 +19,10 @@
 # You should have received a copy of the GNU General Public License
 # along with Ansible.  If not, see <http://www.gnu.org/licenses/>.
 
-ANSIBLE_METADATA = {'status': ['preview'],
-                    'supported_by': 'community',
-                    'version': '1.0'}
+ANSIBLE_METADATA = {'metadata_version': '1.0',
+                    'status': ['preview'],
+                    'supported_by': 'community'}
+
 
 DOCUMENTATION = '''
 ---
@@ -30,7 +31,8 @@ version_added: 2.3
 short_description: Creates a compressed archive of one or more files or trees.
 extends_documentation_fragment: files
 description:
-     - The C(archive) module packs an archive. It is the opposite of the unarchive module. By default, it assumes the compression source exists on the target. It will not copy the source file from the local system to the target before archiving. Source files can be deleted after archival by specifying C(remove)=I(True).
+    - Packs an archive. It is the opposite of M(unarchive). By default, it assumes the compression source exists on the target. It will not copy the
+      source file from the local system to the target before archiving. Source files can be deleted after archival by specifying I(remove=True).
 options:
   path:
     description:
@@ -38,18 +40,18 @@ options:
     required: true
   format:
     description:
-      - The type of compression to use. Can be 'gz', 'bz2', or 'zip'.
+      - The type of compression to use.
     choices: [ 'gz', 'bz2', 'zip' ]
     default: 'gz'
   dest:
     description:
-      - The file name of the destination archive. This is required when C(path) refers to multiple files by either specifying a glob, a directory or multiple paths in a list.
+      - The file name of the destination archive. This is required when C(path) refers to multiple files by either specifying a glob, a directory or
+        multiple paths in a list.
     required: false
     default: null
   remove:
     description:
       - Remove any added source files and trees after adding to archive.
-    type: bool
     required: false
     default: false
 
@@ -105,9 +107,11 @@ archived:
 arcroot:
     description: The archive root.
     type: string
+    returned: always
 expanded_paths:
     description: The list of matching paths from paths argument.
     type: list
+    returned: always
 '''
 
 import os
@@ -323,7 +327,7 @@ def main():
                 module.fail_json(dest=dest, msg='Error deleting some source files: ' + str(e), files=errors)
 
         # Rudimentary check: If size changed then file changed. Not perfect, but easy.
-        if os.path.getsize(dest) != size:
+        if not check_mode and os.path.getsize(dest) != size:
             changed = True
 
         if len(successes) and state != 'incomplete':
@@ -401,7 +405,8 @@ def main():
     params['path'] = dest
     file_args = module.load_file_common_arguments(params)
 
-    changed = module.set_fs_attributes_if_different(file_args, changed)
+    if not check_mode:
+        changed = module.set_fs_attributes_if_different(file_args, changed)
 
     module.exit_json(archived=successes, dest=dest, changed=changed, state=state, arcroot=arcroot, missing=missing, expanded_paths=expanded_paths)
 

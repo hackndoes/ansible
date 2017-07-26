@@ -31,9 +31,10 @@
 # This module is based on python-crontab by Martin Owens.
 #
 
-ANSIBLE_METADATA = {'status': ['preview'],
-                    'supported_by': 'committer',
-                    'version': '1.0'}
+ANSIBLE_METADATA = {'metadata_version': '1.0',
+                    'status': ['preview'],
+                    'supported_by': 'community'}
+
 
 DOCUMENTATION = """
 ---
@@ -83,6 +84,8 @@ options:
       - If specified, uses this file instead of an individual user's crontab.
         If this is a relative path, it is interpreted with respect to
         /etc/cron.d. (If it is absolute, it will typically be /etc/crontab).
+        Many linux distros expect (and some require) the filename portion to consist solely
+        of upper- and lower-case letters, digits, underscores, and hyphens.
         To use the C(cron_file) parameter you must specify the C(user) as well.
     required: false
     default: null
@@ -462,7 +465,6 @@ class CronTab(object):
             else:
                 return "%s%s %s %s %s %s %s" % (disable_prefix,minute,hour,day,month,weekday,job)
 
-        return None
 
     def get_jobnames(self):
         jobnames = []
@@ -631,6 +633,13 @@ def main():
 
     changed      = False
     res_args     = dict()
+    warnings     = list()
+
+    if cron_file:
+        cron_file_basename = os.path.basename(cron_file)
+        if not re.search(r'^[A-Z0-9_-]+$', cron_file_basename, re.I):
+            warnings.append('Filename portion of cron_file ("%s") should consist' % cron_file_basename
+            + ' solely of upper- and lower-case letters, digits, underscores, and hyphens')
 
     # Ensure all files generated are only writable by the owning user.  Primarily relevant for the cron_file option.
     os.umask(int('022', 8))
@@ -654,6 +663,10 @@ def main():
     if (special_time or reboot) and \
        (True in [(x != '*') for x in [minute, hour, day, month, weekday]]):
         module.fail_json(msg="You must specify time and date fields or special time.")
+
+    # cannot support special_time on solaris
+    if (special_time or reboot) and get_platform() == 'SunOS':
+        module.fail_json(msg="Solaris does not support special_time=... or @reboot")
 
     if cron_file and do_install:
         if not user:
@@ -725,13 +738,14 @@ def main():
                 changed = True
 
     # no changes to env/job, but existing crontab needs a terminating newline
-    if not changed:
+    if not changed and not crontab.existing == '':
         if not (crontab.existing.endswith('\r') or crontab.existing.endswith('\n')):
             changed = True
 
     res_args = dict(
         jobs = crontab.get_jobnames(),
         envs = crontab.get_envnames(),
+        warnings = warnings,
         changed = changed
     )
 
@@ -751,12 +765,11 @@ def main():
             res_args['diff'] = diff
 
     # retain the backup only if crontab or cron file have changed
-    if backup:
+    if backup and not module.check_mode:
         if changed:
             res_args['backup_file'] = backup_file
         else:
-            if not module.check_mode:
-                os.unlink(backup_file)
+            os.unlink(backup_file)
 
     if cron_file:
         res_args['cron_file'] = cron_file

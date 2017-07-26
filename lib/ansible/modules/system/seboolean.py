@@ -17,9 +17,10 @@
 # You should have received a copy of the GNU General Public License
 # along with Ansible.  If not, see <http://www.gnu.org/licenses/>.
 
-ANSIBLE_METADATA = {'status': ['stableinterface'],
-                    'supported_by': 'core',
-                    'version': '1.0'}
+ANSIBLE_METADATA = {'metadata_version': '1.0',
+                    'status': ['stableinterface'],
+                    'supported_by': 'core'}
+
 
 DOCUMENTATION = '''
 ---
@@ -48,7 +49,7 @@ options:
     choices: [ 'yes', 'no' ]
 notes:
    - Not tested on any debian based system
-requirements: [ ]
+requirements: [ libselinux-python, libsemanage-python ]
 author: "Stephen Fromm (@sfromm)"
 '''
 
@@ -59,6 +60,8 @@ EXAMPLES = '''
     state: yes
     persistent: yes
 '''
+
+import os
 
 try:
     import selinux
@@ -72,13 +75,23 @@ try:
 except ImportError:
     HAVE_SEMANAGE=False
 
+from ansible.module_utils.basic import AnsibleModule
+from ansible.module_utils.six import binary_type
+from ansible.module_utils._text import to_bytes
+
+
 def has_boolean_value(module, name):
     bools = []
     try:
         rc, bools = selinux.security_get_boolean_names()
     except OSError:
         module.fail_json(msg="Failed to get list of boolean names")
-    if to_bytes(name) in bools:
+    # work around for selinux who changed its API, see
+    # https://github.com/ansible/ansible/issues/25651
+    if len(bools) > 0:
+        if isinstance(bools[0], binary_type):
+            name = to_bytes(name)
+    if name in bools:
         return True
     else:
         return False
@@ -145,8 +158,7 @@ def semanage_boolean_value(module, name, state):
 
         semanage.semanage_disconnect(handle)
         semanage.semanage_handle_destroy(handle)
-    except Exception:
-        e = get_exception()
+    except Exception as e:
         module.fail_json(msg="Failed to manage policy for boolean %s: %s" % (name, str(e)))
     return True
 
@@ -213,16 +225,13 @@ def main():
 
     result['changed'] = r
     if not r:
-        module.fail_json(msg="Failed to set boolean %s to %s" % (name, value))
+        module.fail_json(msg="Failed to set boolean %s to %s" % (name, state))
     try:
         selinux.security_commit_booleans()
     except:
         module.fail_json(msg="Failed to commit pending boolean %s value" % name)
     module.exit_json(**result)
 
-# import module snippets
-from ansible.module_utils.basic import *
-from ansible.module_utils._text import to_bytes
 
 if __name__ == '__main__':
     main()

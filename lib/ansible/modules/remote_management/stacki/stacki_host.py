@@ -16,9 +16,10 @@
 # You should have received a copy of the GNU General Public License
 # along with this software.  If not, see <http://www.gnu.org/licenses/>.
 
-ANSIBLE_METADATA = {'status': ['preview'],
-                    'supported_by': 'community',
-                    'version': '1.0'}
+ANSIBLE_METADATA = {'metadata_version': '1.0',
+                    'status': ['preview'],
+                    'supported_by': 'community'}
+
 
 DOCUMENTATION = '''
 ---
@@ -62,7 +63,7 @@ options:
   force_install:
     description:
      - Set value to True to force node into install state if it already exists in stacki.
-    requiored: False
+    required: False
 
 author: "Hugh Ma <Hugh.Ma@flextronics.com>"
 '''
@@ -107,15 +108,17 @@ stdout_lines:
   sample: [['...', '...'], ['...'], ['...']]
 '''
 
+import json
 import os
 import re
 import tempfile
-import json
-import urllib
+
+from ansible.module_utils.basic import AnsibleModule
+from ansible.module_utils.six.moves.urllib.parse import urlencode
+from ansible.module_utils.urls import fetch_url, ConnectionError
 
 
-
-class StackiHost:
+class StackiHost(object):
 
     def __init__(self, module):
         self.module = module
@@ -132,7 +135,7 @@ class StackiHost:
         auth_creds  = {'USERNAME': module.params['stacki_user'],
                        'PASSWORD': module.params['stacki_password']}
 
-        # Get Intial CSRF
+        # Get Initial CSRF
         cred_a = self.do_request(self.module, self.endpoint, method="GET")
         cookie_a = cred_a.headers.get('Set-Cookie').split(';')
         init_csrftoken = None
@@ -151,7 +154,7 @@ class StackiHost:
 
         # Get Final CSRF and Session ID
         login_req = self.do_request(self.module, login_endpoint, headers=header,
-                                    payload=urllib.urlencode(auth_creds), method="POST")
+                                    payload=urlencode(auth_creds), method='POST')
 
         cookie_f = login_req.headers.get('Set-Cookie').split(';')
         csrftoken = None
@@ -198,7 +201,7 @@ class StackiHost:
                               headers=self.header, method="POST")
 
 
-    def stack_force_install(self):
+    def stack_force_install(self, result):
 
         data = dict()
         changed = False
@@ -213,15 +216,6 @@ class StackiHost:
 
         result['changed'] = changed
         result['stdout'] = "api call successful".rstrip("\r\n")
-
-
-    def stack_add_interface(self):
-
-        data['cmd'] = "add host interface {0} interface={1} ip={2} network={3} mac={4} default=true"\
-            .format(self.hostname, self.prim_intf, self.prim_intf_ip, self.network, self.prim_intf_mac)
-        res = self.do_request(self.module, self.endpoint, payload=json.dumps(data),
-                              headers=self.header, method="POST")
-
 
     def stack_add(self, result):
 
@@ -304,9 +298,6 @@ def main():
 
     module.exit_json(**result)
 
-# import module snippets
-from ansible.module_utils.basic import AnsibleModule
-from ansible.module_utils.urls import fetch_url, ConnectionError
 
 if __name__ == '__main__':
     main()

@@ -19,9 +19,10 @@
 # along with Ansible.  If not, see <http://www.gnu.org/licenses/>.
 
 
-ANSIBLE_METADATA = {'status': ['preview'],
-                    'supported_by': 'community',
-                    'version': '1.0'}
+ANSIBLE_METADATA = {'metadata_version': '1.0',
+                    'status': ['preview'],
+                    'supported_by': 'community'}
+
 
 DOCUMENTATION = """
 ---
@@ -391,7 +392,7 @@ RETURN="""
 lxc_container:
     description: container information
     returned: success
-    type: list
+    type: complex
     contains:
         name:
             description: name of the lxc container
@@ -430,7 +431,13 @@ lxc_container:
             sample: True
 """
 
+import os
+import os.path
 import re
+import shutil
+import subprocess
+import tempfile
+import time
 
 try:
     import lxc
@@ -438,6 +445,11 @@ except ImportError:
     HAS_LXC = False
 else:
     HAS_LXC = True
+
+# import module bits
+from ansible.module_utils.basic import AnsibleModule
+from ansible.module_utils.parsing.convert_bool import BOOLEANS_FALSE, BOOLEANS_TRUE
+from ansible.module_utils.six.moves import xrange
 
 
 # LXC_COMPRESSION_MAP is a map of available compression types when creating
@@ -541,6 +553,7 @@ ATTACH_TEMPLATE = """#!/usr/bin/env bash
 pushd "$(getent passwd $(whoami)|cut -f6 -d':')"
     if [[ -f ".bashrc" ]];then
         source .bashrc
+        unset HOSTNAME
     fi
 popd
 
@@ -559,11 +572,6 @@ def create_script(command):
                     with newlines as separation.
     :type command: ``str``
     """
-
-    import os
-    import os.path as path
-    import subprocess
-    import tempfile
 
     (fd, script_file) = tempfile.mkstemp(prefix='lxc-attach-script')
     f = os.fdopen(fd, 'wb')
@@ -680,7 +688,7 @@ class LxcContainerManagement(object):
             variables.pop(v, None)
 
         return_dict = dict()
-        false_values = [None, ''] + BOOLEANS_FALSE
+        false_values = BOOLEANS_FALSE.union([None, ''])
         for k, v in variables.items():
             _var = self.module.params.get(k)
             if _var not in false_values:
@@ -1759,7 +1767,5 @@ def main():
     lxc_manage.run()
 
 
-# import module bits
-from ansible.module_utils.basic import *
 if __name__ == '__main__':
     main()

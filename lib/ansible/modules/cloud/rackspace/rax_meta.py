@@ -16,9 +16,10 @@
 
 # This is a DOCUMENTATION stub specific to this module, it extends
 # a documentation fragment located in ansible.utils.module_docs_fragments
-ANSIBLE_METADATA = {'status': ['preview'],
-                    'supported_by': 'community',
-                    'version': '1.0'}
+ANSIBLE_METADATA = {'metadata_version': '1.0',
+                    'status': ['preview'],
+                    'supported_by': 'community'}
+
 
 DOCUMENTATION = '''
 ---
@@ -73,11 +74,17 @@ EXAMPLES = '''
         region: DFW
 '''
 
+import json
+
 try:
     import pyrax
     HAS_PYRAX = True
 except ImportError:
     HAS_PYRAX = False
+
+from ansible.module_utils.basic import AnsibleModule
+from ansible.module_utils.rax import rax_argument_spec, rax_required_together, setup_rax_module
+from ansible.module_utils.six import string_types
 
 
 def rax_meta(module, address, name, server_id, meta):
@@ -127,7 +134,7 @@ def rax_meta(module, address, name, server_id, meta):
             meta[k] = ','.join(['%s' % i for i in v])
         elif isinstance(v, dict):
             meta[k] = json.dumps(v)
-        elif not isinstance(v, basestring):
+        elif not isinstance(v, string_types):
             meta[k] = '%s' % v
 
     server = servers[0]
@@ -173,12 +180,6 @@ def main():
 
     rax_meta(module, address, name, server_id, meta)
 
-
-# import module snippets
-from ansible.module_utils.basic import *
-from ansible.module_utils.rax import *
-
-### invoke the module
 
 if __name__ == '__main__':
     main()

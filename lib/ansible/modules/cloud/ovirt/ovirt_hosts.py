@@ -19,22 +19,23 @@
 # along with Ansible.  If not, see <http://www.gnu.org/licenses/>.
 #
 
-ANSIBLE_METADATA = {'status': ['preview'],
-                    'supported_by': 'community',
-                    'version': '1.0'}
+ANSIBLE_METADATA = {'metadata_version': '1.0',
+                    'status': ['preview'],
+                    'supported_by': 'community'}
+
 
 DOCUMENTATION = '''
 ---
 module: ovirt_hosts
-short_description: Module to manage hosts in oVirt
+short_description: Module to manage hosts in oVirt/RHV
 version_added: "2.3"
 author: "Ondra Machacek (@machacekondra)"
 description:
-    - "Module to manage hosts in oVirt"
+    - "Module to manage hosts in oVirt/RHV"
 options:
     name:
         description:
-            - "Name of the the host to manage."
+            - "Name of the host to manage."
         required: true
     state:
         description:
@@ -73,6 +74,7 @@ options:
     override_iptables:
         description:
             - "If True host iptables will be overridden by host deploy script."
+            - "Note that C(override_iptables) is I(false) by default in oVirt/RHV."
     force:
         description:
             - "If True host will be forcibly moved to desired state."
@@ -108,12 +110,14 @@ EXAMPLES = '''
 # Examples don't contain auth parameter for simplicity,
 # look at ovirt_auth module to see how to reuse authentication:
 
-# Add host with username/password supporting SR-IOV:
+# Add host with username/password supporting SR-IOV.
+# Note that override_iptables is false by default in oVirt/RHV:
 - ovirt_hosts:
     cluster: Default
     name: myhost
     address: 10.34.61.145
     password: secret
+    override_iptables: true
     kernel_params:
       - intel_iommu=on
 
@@ -123,6 +127,7 @@ EXAMPLES = '''
     cluster: Default
     name: myhost2
     address: 10.34.61.145
+    override_iptables: true
 
 # Deploy hosted engine host
 - ovirt_hosts:
@@ -130,6 +135,7 @@ EXAMPLES = '''
     name: myhost2
     password: secret
     address: 10.34.61.145
+    override_iptables: true
     hosted_engine: deploy
 
 # Maintenance
@@ -167,11 +173,13 @@ id:
     type: str
     sample: 7de90f31-222c-436c-a1ca-7e655bd5b60c
 host:
-    description: "Dictionary of all the host attributes. Host attributes can be found on your oVirt instance
-                  at following url: https://ovirt.example.com/ovirt-engine/api/model#types/host."
+    description: "Dictionary of all the host attributes. Host attributes can be found on your oVirt/RHV instance
+                  at following url: http://ovirt.github.io/ovirt-engine-api-model/master/#types/host."
     returned: On success if host is found.
+    type: dict
 '''
 
+import time
 import traceback
 
 try:
@@ -302,6 +310,8 @@ def control_state(host_module):
             fail_condition=failed_state,
         )
 
+    return host
+
 
 def main():
     argument_spec = ovirt_full_argument_spec(
@@ -334,7 +344,8 @@ def main():
     check_sdk(module)
 
     try:
-        connection = create_connection(module.params.pop('auth'))
+        auth = module.params.pop('auth')
+        connection = create_connection(auth)
         hosts_service = connection.system_service().hosts_service()
         hosts_module = HostsModule(
             connection=connection,
@@ -343,7 +354,7 @@ def main():
         )
 
         state = module.params['state']
-        control_state(hosts_module)
+        host = control_state(hosts_module)
         if state == 'present':
             hosts_module.create(
                 deploy_hosted_engine=(
@@ -367,10 +378,12 @@ def main():
             )
             ret = hosts_module.create()
         elif state == 'upgraded':
+            result_state = hoststate.MAINTENANCE if host.status == hoststate.MAINTENANCE else hoststate.UP
             ret = hosts_module.action(
                 action='upgrade',
                 action_condition=lambda h: h.update_available,
-                wait_condition=lambda h: h.status == hoststate.UP,
+                wait_condition=lambda h: h.status == result_state,
+                post_action=lambda h: time.sleep(module.params['poll_interval']),
                 fail_condition=failed_state,
             )
         elif state == 'started':
@@ -444,7 +457,7 @@ def main():
     except Exception as e:
         module.fail_json(msg=str(e), exception=traceback.format_exc())
     finally:
-        connection.close(logout=False)
+        connection.close(logout=auth.get('token') is None)
 
 
 if __name__ == "__main__":

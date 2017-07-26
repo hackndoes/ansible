@@ -19,9 +19,10 @@
 # along with Ansible.  If not, see <http://www.gnu.org/licenses/>.
 #
 
-ANSIBLE_METADATA = {'status': ['preview'],
-                    'supported_by': 'committer',
-                    'version': '1.0'}
+ANSIBLE_METADATA = {'metadata_version': '1.0',
+                    'status': ['preview'],
+                    'supported_by': 'curated'}
+
 
 DOCUMENTATION = '''
 ---
@@ -51,7 +52,8 @@ options:
         description:
             - Assert the state of the virtual machine.
             - State 'present' will check that the machine exists with the requested configuration. If the configuration
-              of the existing machine does not match, the machine will be updated. Use options started, allocated and restarted to change the machine's power state.
+              of the existing machine does not match, the machine will be updated. Use options started, allocated and restarted to change the machine's power
+              state.
             - State 'absent' will remove the virtual machine.
         default: present
         required: false
@@ -88,8 +90,7 @@ options:
         description:
             - A valid Azure VM size value. For example, 'Standard_D4'. The list of choices varies depending on the
               subscription and location. Check your subscription for available choices.
-        default: Standard_D1
-        required: false
+        required: true
     admin_username:
         description:
             - Admin username used to access the host after it is created. Required when creating a VM.
@@ -312,7 +313,7 @@ azure_vm:
     description: Facts about the current state of the object. Note that facts are not part of the registered output but available directly.
     returned: always
     type: complex
-    example: {
+    contains: {
         "properties": {
             "hardwareProfile": {
                 "vmSize": "Standard_D1"
@@ -436,7 +437,7 @@ azure_vm:
         },
         "type": "Microsoft.Compute/virtualMachines"
     }
-'''
+'''  # NOQA
 
 import random
 
@@ -485,7 +486,7 @@ class AzureRMVirtualMachine(AzureRMModuleBase):
             state=dict(choices=['present', 'absent'], default='present', type='str'),
             location=dict(type='str'),
             short_hostname=dict(type='str'),
-            vm_size=dict(type='str', choices=[], default='Standard_D1'),
+            vm_size=dict(type='str', required=True),
             admin_username=dict(type='str'),
             admin_password=dict(type='str', no_log=True),
             ssh_password_enabled=dict(type='bool', default=True),
@@ -508,9 +509,6 @@ class AzureRMVirtualMachine(AzureRMModuleBase):
             restarted=dict(type='bool', default=False),
             started=dict(type='bool', default=True),
         )
-
-        for key in VirtualMachineSizeTypes:
-            self.module_arg_spec['vm_size']['choices'].append(getattr(key, 'value'))
 
         self.resource_group = None
         self.name = None
@@ -553,7 +551,7 @@ class AzureRMVirtualMachine(AzureRMModuleBase):
 
     def exec_module(self, **kwargs):
 
-        for key in self.module_arg_spec.keys() + ['tags']:
+        for key in list(self.module_arg_spec.keys()) + ['tags']:
             setattr(self, key, kwargs[key])
 
         # make sure options are lower case
@@ -686,8 +684,7 @@ class AzureRMVirtualMachine(AzureRMModuleBase):
         except CloudError:
             self.log('Virtual machine {0} does not exist'.format(self.name))
             if self.state == 'present':
-                self.log("CHANGED: virtual machine does not exist but state is present." \
-                    .format(self.name))
+                self.log("CHANGED: virtual machine {0} does not exist but state is 'present'.".format(self.name))
                 changed = True
 
         self.results['changed'] = changed
@@ -792,7 +789,6 @@ class AzureRMVirtualMachine(AzureRMModuleBase):
                     vhd = VirtualHardDisk(uri=vm_dict['properties']['storageProfile']['osDisk']['vhd']['uri'])
                     vm_resource = VirtualMachine(
                         vm_dict['location'],
-                        vm_id=vm_dict['properties']['vmId'],
                         os_profile=OSProfile(
                             admin_username=vm_dict['properties']['osProfile']['adminUsername'],
                             computer_name=vm_dict['properties']['osProfile']['computerName']
@@ -846,13 +842,13 @@ class AzureRMVirtualMachine(AzureRMModuleBase):
                     self.create_or_update_vm(vm_resource)
 
                 # Make sure we leave the machine in requested power state
-                if powerstate_change == 'poweron' and \
-                    self.results['ansible_facts']['azure_vm']['powerstate'] != 'running':
+                if (powerstate_change == 'poweron' and
+                        self.results['ansible_facts']['azure_vm']['powerstate'] != 'running'):
                     # Attempt to power on the machine
                     self.power_on_vm()
 
-                elif powerstate_change == 'poweroff' and \
-                    self.results['ansible_facts']['azure_vm']['powerstate'] == 'running':
+                elif (powerstate_change == 'poweroff' and
+                        self.results['ansible_facts']['azure_vm']['powerstate'] == 'running'):
                     # Attempt to power off the machine
                     self.power_off_vm()
 
@@ -885,7 +881,7 @@ class AzureRMVirtualMachine(AzureRMModuleBase):
             vm = self.compute_client.virtual_machines.get(self.resource_group, self.name, expand='instanceview')
             return vm
         except Exception as exc:
-            self.fail("Error getting virtual machine (0) - {1}".format(self.name, str(exc)))
+            self.fail("Error getting virtual machine {0} - {1}".format(self.name, str(exc)))
 
     def serialize_vm(self, vm):
         '''
@@ -1089,7 +1085,7 @@ class AzureRMVirtualMachine(AzureRMModuleBase):
                                                                        self.image['offer'],
                                                                        self.image['sku'])
         except Exception as exc:
-            self.fail("Error fetching image {0} {1} {2} - {4}".format(self.image['publisher'],
+            self.fail("Error fetching image {0} {1} {2} - {3}".format(self.image['publisher'],
                                                                       self.image['offer'],
                                                                       self.image['sku'],
                                                                       str(exc)))
@@ -1242,7 +1238,7 @@ class AzureRMVirtualMachine(AzureRMModuleBase):
 
         if self.subnet_name:
             try:
-                subnet = self.network_client.subnets.get(self.resource_group, virtual_network_name)
+                subnet = self.network_client.subnets.get(self.resource_group, virtual_network_name, self.subnet_name)
                 subnet_id = subnet.id
             except Exception as exc:
                 self.fail("Error: fetching subnet {0} - {1}".format(self.subnet_name, str(exc)))

@@ -16,9 +16,10 @@
 
 # This is a DOCUMENTATION stub specific to this module, it extends
 # a documentation fragment located in ansible.utils.module_docs_fragments
-ANSIBLE_METADATA = {'status': ['preview'],
-                    'supported_by': 'community',
-                    'version': '1.0'}
+ANSIBLE_METADATA = {'metadata_version': '1.0',
+                    'status': ['preview'],
+                    'supported_by': 'community'}
+
 
 DOCUMENTATION = '''
 ---
@@ -239,11 +240,23 @@ EXAMPLES = '''
       register: rax
 '''
 
+import os
+import json
+import re
+import time
+
 try:
     import pyrax
     HAS_PYRAX = True
 except ImportError:
     HAS_PYRAX = False
+
+from ansible.module_utils.basic import AnsibleModule
+from ansible.module_utils.rax import (FINAL_STATUSES, rax_argument_spec, rax_find_bootable_volume,
+                                      rax_find_image, rax_find_network, rax_find_volume,
+                                      rax_required_together, rax_to_dict, setup_rax_module)
+from ansible.module_utils.six.moves import xrange
+from ansible.module_utils.six import string_types
 
 
 def rax_find_server_image(module, server, image, boot_volume):
@@ -337,7 +350,7 @@ def create(module, names=[], flavor=None, image=None, meta={}, key_name=None,
                 try:
                     server.get()
                 except:
-                    server.status == 'ERROR'
+                    server.status = 'ERROR'
 
             if not filter(lambda s: s.status not in FINAL_STATUSES,
                           servers):
@@ -351,7 +364,7 @@ def create(module, names=[], flavor=None, image=None, meta={}, key_name=None,
         try:
             server.get()
         except:
-            server.status == 'ERROR'
+            server.status = 'ERROR'
         instance = rax_to_dict(server, 'server')
         if server.status == 'ACTIVE' or not wait:
             success.append(instance)
@@ -514,7 +527,7 @@ def cloudservers(module, state=None, name=None, flavor=None, image=None,
             meta[k] = ','.join(['%s' % i for i in v])
         elif isinstance(v, dict):
             meta[k] = json.dumps(v)
-        elif not isinstance(v, basestring):
+        elif not isinstance(v, string_types):
             meta[k] = '%s' % v
 
     # When using state=absent with group, the absent block won't match the
@@ -888,12 +901,6 @@ def main():
                  boot_volume=boot_volume, boot_volume_size=boot_volume_size,
                  boot_volume_terminate=boot_volume_terminate)
 
-
-# import module snippets
-from ansible.module_utils.basic import *
-from ansible.module_utils.rax import *
-
-# invoke the module
 
 if __name__ == '__main__':
     main()

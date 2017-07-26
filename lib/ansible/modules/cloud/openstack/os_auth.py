@@ -15,9 +15,10 @@
 # You should have received a copy of the GNU General Public License
 # along with this software.  If not, see <http://www.gnu.org/licenses/>.
 
-ANSIBLE_METADATA = {'status': ['preview'],
-                    'supported_by': 'community',
-                    'version': '1.0'}
+ANSIBLE_METADATA = {'metadata_version': '1.0',
+                    'status': ['preview'],
+                    'supported_by': 'community'}
+
 
 DOCUMENTATION = '''
 ---
@@ -30,6 +31,11 @@ description:
 requirements:
     - "python >= 2.6"
     - "shade"
+options:
+  availability_zone:
+    description:
+      - Ignored. Present for backwards compatibility
+    required: false
 extends_documentation_fragment: openstack
 '''
 
@@ -67,8 +73,8 @@ def main():
             ansible_facts=dict(
                 auth_token=cloud.auth_token,
                 service_catalog=cloud.service_catalog))
-    except shade.OpenStackCloudException as e:
-        module.fail_json(msg=str(e))
+    except Exception as e:
+        module.fail_json(msg=str(e), exception=traceback.format_exc())
 
 # this is magic, see lib/ansible/module_common.py
 from ansible.module_utils.basic import *

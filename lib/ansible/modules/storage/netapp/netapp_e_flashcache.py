@@ -17,9 +17,10 @@
 # You should have received a copy of the GNU General Public License
 # along with Ansible.  If not, see <http://www.gnu.org/licenses/>.
 #
-ANSIBLE_METADATA = {'status': ['preview'],
-                    'supported_by': 'community',
-                    'version': '1.0'}
+ANSIBLE_METADATA = {'metadata_version': '1.0',
+                    'status': ['preview'],
+                    'supported_by': 'community'}
+
 
 DOCUMENTATION = '''
 module: netapp_e_flashcache
@@ -41,8 +42,6 @@ options:
       required: true
       description:
       - The url to the SANtricity WebServices Proxy or embedded REST API.
-      example:
-      - https://prod-1.wahoo.acme.com/devmgr/v2
   validate_certs:
       required: false
       default: true
@@ -101,13 +100,14 @@ msg:
 import json
 import logging
 import sys
+import traceback
 
 from ansible.module_utils.api import basic_auth_argument_spec
 from ansible.module_utils.basic import AnsibleModule
-from ansible.module_utils.pycompat24 import get_exception
-from ansible.module_utils.urls import open_url
-
+from ansible.module_utils.six.moves import reduce
 from ansible.module_utils.six.moves.urllib.error import HTTPError
+from ansible.module_utils._text import to_native
+from ansible.module_utils.urls import open_url
 
 
 def request(url, data=None, headers=None, method='GET', use_proxy=True,
@@ -118,8 +118,7 @@ def request(url, data=None, headers=None, method='GET', use_proxy=True,
                      force=force, last_mod_time=last_mod_time, timeout=timeout, validate_certs=validate_certs,
                      url_username=url_username, url_password=url_password, http_agent=http_agent,
                      force_basic_auth=force_basic_auth)
-    except HTTPError:
-        err = get_exception()
+    except HTTPError as err:
         r = err.fp
 
     try:
@@ -415,10 +414,11 @@ def main():
     sp = NetAppESeriesFlashCache()
     try:
         sp.apply()
-    except Exception:
-        e = get_exception()
-        sp.debug("Exception in apply(): \n%s" % str(e))
-        sp.module.fail_json(msg="Failed to create flash cache. Error[%s]" % str(e))
+    except Exception as e:
+        sp.debug("Exception in apply(): \n%s" % to_native(e))
+        sp.module.fail_json(msg="Failed to create flash cache. Error[%s]" % to_native(e),
+                            exception=traceback.format_exc())
+
 
 if __name__ == '__main__':
     main()

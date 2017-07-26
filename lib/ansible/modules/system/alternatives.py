@@ -22,9 +22,10 @@ You should have received a copy of the GNU General Public License
 along with Ansible.  If not, see <http://www.gnu.org/licenses/>.
 """
 
-ANSIBLE_METADATA = {'status': ['preview'],
-                    'supported_by': 'community',
-                    'version': '1.0'}
+ANSIBLE_METADATA = {'metadata_version': '1.0',
+                    'status': ['preview'],
+                    'supported_by': 'community'}
+
 
 DOCUMENTATION = '''
 ---
@@ -80,8 +81,9 @@ EXAMPLES = '''
 '''
 
 import re
-from ansible.module_utils.basic import *
-from ansible.module_utils.pycompat24 import get_exception
+import subprocess
+
+from ansible.module_utils.basic import AnsibleModule
 
 
 def main():
@@ -160,8 +162,7 @@ def main():
             )
 
             module.exit_json(changed=True)
-        except subprocess.CalledProcessError:
-            e = get_exception()
+        except subprocess.CalledProcessError as cpe:
             module.fail_json(msg=str(dir(cpe)))
     else:
         module.exit_json(changed=False)

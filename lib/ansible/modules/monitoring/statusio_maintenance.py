@@ -18,9 +18,10 @@
 # You should have received a copy of the GNU General Public License
 # along with Ansible. If not, see <http://www.gnu.org/licenses/>.
 
-ANSIBLE_METADATA = {'status': ['preview'],
-                    'supported_by': 'community',
-                    'version': '1.0'}
+ANSIBLE_METADATA = {'metadata_version': '1.0',
+                    'status': ['preview'],
+                    'supported_by': 'community'}
+
 
 DOCUMENTATION = '''
 
@@ -189,6 +190,11 @@ EXAMPLES = '''
 RETURN = ''' # '''
 
 import datetime
+import json
+
+from ansible.module_utils.basic import AnsibleModule
+from ansible.module_utils._text import to_native
+from ansible.module_utils.urls import open_url
 
 
 def get_api_auth_headers(api_id, api_key, url, statuspage):
@@ -209,8 +215,8 @@ def get_api_auth_headers(api_id, api_key, url, statuspage):
         else:
             auth_headers = headers
             auth_content = data
-    except:
-        return 1, None, None, e
+    except Exception as e:
+        return 1, None, None, to_native(e)
     return 0, auth_headers, auth_content, None
 
 
@@ -319,9 +325,8 @@ def create_maintenance(auth_headers, url, statuspage, host_ids,
 
         if data["status"]["error"] == "yes":
             return 1, None, data["status"]["message"]
-    except Exception:
-        e = get_exception()
-        return 1, None, str(e)
+    except Exception as e:
+        return 1, None, to_native(e)
     return 0, None, None
 
 
@@ -338,9 +343,8 @@ def delete_maintenance(auth_headers, url, statuspage, maintenance_id):
         data = json.loads(response.read())
         if data["status"]["error"] == "yes":
             return 1, None, "Invalid maintenance_id"
-    except Exception:
-        e = get_exception()
-        return 1, None, str(e)
+    except Exception as e:
+        return 1, None, to_native(e)
     return 0, None, None
 
 
@@ -474,7 +478,6 @@ def main():
                 module.fail_json(
                     msg="Failed to delete maintenance: %s" % error)
 
-from ansible.module_utils.basic import *
-from ansible.module_utils.urls import *
+
 if __name__ == '__main__':
     main()

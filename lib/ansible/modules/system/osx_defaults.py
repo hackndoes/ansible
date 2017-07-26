@@ -16,9 +16,10 @@
 # You should have received a copy of the GNU General Public License
 # along with Ansible. If not, see <http://www.gnu.org/licenses/>.
 
-ANSIBLE_METADATA = {'status': ['stableinterface'],
-                    'supported_by': 'community',
-                    'version': '1.0'}
+ANSIBLE_METADATA = {'metadata_version': '1.0',
+                    'status': ['stableinterface'],
+                    'supported_by': 'community'}
+
 
 DOCUMENTATION = '''
 ---
@@ -119,7 +120,8 @@ import datetime
 import re
 
 from ansible.module_utils.basic import AnsibleModule
-from ansible.module_utils.pycompat24 import get_exception
+from ansible.module_utils.six import binary_type, text_type
+
 
 # exceptions --------------------------------------------------------------- {{{
 class OSXDefaultsException(Exception):
@@ -168,7 +170,7 @@ class OSXDefaults(object):
         if type == "string":
             return str(value)
         elif type in ["bool", "boolean"]:
-            if isinstance(value, basestring):
+            if isinstance(value, (binary_type, text_type)):
                 value = value.lower()
             if value in [True, 1, "true", "1", "yes"]:
                 return True
@@ -413,8 +415,7 @@ def main():
                                array_add=array_add, value=value, state=state, path=path)
         changed = defaults.run()
         module.exit_json(changed=changed)
-    except OSXDefaultsException:
-        e = get_exception()
+    except OSXDefaultsException as e:
         module.fail_json(msg=e.message)
 
 # /main ------------------------------------------------------------------- }}}

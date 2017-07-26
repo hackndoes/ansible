@@ -17,9 +17,10 @@
 # You should have received a copy of the GNU General Public License
 # along with Ansible.  If not, see <http://www.gnu.org/licenses/>.
 #
-ANSIBLE_METADATA = {'status': ['preview'],
-                    'supported_by': 'community',
-                    'version': '1.0'}
+ANSIBLE_METADATA = {'metadata_version': '1.0',
+                    'status': ['preview'],
+                    'supported_by': 'community'}
+
 
 DOCUMENTATION = '''
 
@@ -85,30 +86,30 @@ options:
 '''
 
 EXAMPLES = """
-    - name: Create Account
-      sf_account_manager:
-       hostname: "{{ solidfire_hostname }}"
-       username: "{{ solidfire_username }}"
-       password: "{{ solidfire_password }}"
-       state: present
-       name: TenantA
+- name: Create Account
+  sf_account_manager:
+    hostname: "{{ solidfire_hostname }}"
+    username: "{{ solidfire_username }}"
+    password: "{{ solidfire_password }}"
+    state: present
+    name: TenantA
 
-    - name: Modify Account
-     sf_account_manager:
-       hostname: "{{ solidfire_hostname }}"
-       username: "{{ solidfire_username }}"
-       password: "{{ solidfire_password }}"
-       state: present
-       name: TenantA
-       new_name: TenantA-Renamed
+- name: Modify Account
+  sf_account_manager:
+    hostname: "{{ solidfire_hostname }}"
+    username: "{{ solidfire_username }}"
+    password: "{{ solidfire_password }}"
+    state: present
+    name: TenantA
+    new_name: TenantA-Renamed
 
-    - name: Delete Account
-     sf_account_manager:
-       hostname: "{{ solidfire_hostname }}"
-       username: "{{ solidfire_username }}"
-       password: "{{ solidfire_password }}"
-       state: absent
-       name: TenantA-Renamed
+- name: Delete Account
+  sf_account_manager:
+    hostname: "{{ solidfire_hostname }}"
+    username: "{{ solidfire_username }}"
+    password: "{{ solidfire_password }}"
+    state: absent
+    name: TenantA-Renamed
 """
 
 RETURN = """

@@ -18,9 +18,10 @@
 # along with Ansible.  If not, see <http://www.gnu.org/licenses/>.
 #
 
-ANSIBLE_METADATA = {'status': ['preview'],
-                    'supported_by': 'community',
-                    'version': '1.0'}
+ANSIBLE_METADATA = {'metadata_version': '1.0',
+                    'status': ['preview'],
+                    'supported_by': 'community'}
+
 
 DOCUMENTATION = '''
 ---
@@ -37,7 +38,7 @@ requirements:
 options:
   session:
     description:
-      - An existing AOS session as obtained by aos_login module.
+      - An existing AOS session as obtained by M(aos_login) module.
     required: true
   name:
     description:
@@ -66,34 +67,34 @@ EXAMPLES = '''
 
 - name: "Create an IP Pool with one subnet"
   aos_ip_pool:
-    session: "{{ session_ok }}"
+    session: "{{ aos_session }}"
     name: "my-ip-pool"
     subnets: [ 172.10.0.0/16 ]
     state: present
 
 - name: "Create an IP Pool with multiple subnets"
   aos_ip_pool:
-    session: "{{ session_ok }}"
+    session: "{{ aos_session }}"
     name: "my-other-ip-pool"
     subnets: [ 172.10.0.0/16, 192.168.0.0./24 ]
     state: present
 
 - name: "Check if an IP Pool exist with same subnets by ID"
   aos_ip_pool:
-    session: "{{ session_ok }}"
+    session: "{{ aos_session }}"
     name: "45ab26fc-c2ed-4307-b330-0870488fa13e"
     subnets: [ 172.10.0.0/16, 192.168.0.0./24 ]
     state: present
 
 - name: "Delete an IP Pool by name"
   aos_ip_pool:
-    session: "{{ session }}"
+    session: "{{ aos_session }}"
     name: "my-ip-pool"
     state: absent
 
 - name: "Delete an IP pool by id"
   aos_ip_pool:
-    session: "{{ session }}"
+    session: "{{ aos_session }}"
     id: "45ab26fc-c2ed-4307-b330-0870488fa13e"
     state: absent
 
@@ -101,7 +102,7 @@ EXAMPLES = '''
 
 - name: "Access IP Pool 1/3"
   aos_ip_pool:
-    session: "{{ session_ok }}"
+    session: "{{ aos_session }}"
     name: "my-ip-pool"
     subnets: [ 172.10.0.0/16, 172.12.0.0/16 ]
     state: present
@@ -119,19 +120,19 @@ EXAMPLES = '''
 
 - name: "Load IP Pool from a JSON file"
   aos_ip_pool:
-    session: "{{ session_ok }}"
+    session: "{{ aos_session }}"
     content: "{{ lookup('file', 'resources/ip_pool_saved.json') }}"
     state: present
 
 - name: "Load IP Pool from a YAML file"
   aos_ip_pool:
-    session: "{{ session_ok }}"
+    session: "{{ aos_session }}"
     content: "{{ lookup('file', 'resources/ip_pool_saved.yaml') }}"
     state: present
 
 - name: "Load IP Pool from a Variable"
   aos_ip_pool:
-    session: "{{ session_ok }}"
+    session: "{{ aos_session }}"
     content:
       display_name: my-ip-pool
       id: 4276738d-6f86-4034-9656-4bff94a34ea7
@@ -210,7 +211,7 @@ def ip_pool_absent(module, aos, my_pool):
         try:
             my_pool.delete()
         except:
-            module.fail_json(msg="An error occured, while trying to delete the IP Pool")
+            module.fail_json(msg="An error occurred, while trying to delete the IP Pool")
 
     module.exit_json( changed=True,
                       name=my_pool.name,
@@ -245,7 +246,7 @@ def ip_pool_present(module, aos, my_pool):
                 my_new_pool = create_new_ip_pool(my_pool, margs['name'], margs['subnets'])
                 my_pool = my_new_pool
             except:
-                module.fail_json(msg="An error occured while trying to create a new IP Pool ")
+                module.fail_json(msg="An error occurred while trying to create a new IP Pool ")
 
         module.exit_json( changed=True,
                           name=my_pool.name,
